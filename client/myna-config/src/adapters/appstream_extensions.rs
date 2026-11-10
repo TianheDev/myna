@@ -248,4 +248,68 @@ mod tests {
         assert_eq!(calls[0].arguments()[1], "search");
         assert_eq!(calls[1].arguments()[1], "dump");
     }
+
+    #[test]
+    fn discovery_sorts_deduplicates_and_skips_non_addon_dumps() {
+        let runner = FakeCommandRunner::scripted([
+            output(
+                "Identifier: org.example.Zulu [addon]\n\
+                 Identifier: org.example.Alpha [addon]\n\
+                 Identifier: org.example.Alpha [addon]\n\
+                 Identifier: org.example.Desktop [desktop-application]\n\
+                 unrelated line\n",
+            ),
+            output(
+                r#"<component type="addon">
+                  <id>org.example.Alpha</id>
+                  <name>Alpha</name>
+                  <extends>com.canonical.Myna.Config</extends>
+                  <pkgname>myna-alpha</pkgname>
+                </component>"#,
+            ),
+            output("<component type=\"desktop-application\"/>"),
+            output(
+                r#"<component type="addon">
+                  <id>org.example.Zulu</id>
+                  <name>zulu</name>
+                  <extends>com.canonical.Myna.Config</extends>
+                  <pkgname>myna-zulu</pkgname>
+                </component>"#,
+            ),
+        ]);
+        let catalog = AppStreamExtensionCatalog::new(Arc::new(runner));
+        let found = gtk4::glib::MainContext::new()
+            .block_on(catalog.discover(CancellationToken::new()))
+            .unwrap();
+
+        assert_eq!(
+            found
+                .iter()
+                .map(|extension| extension.component_id.as_str())
+                .collect::<Vec<_>>(),
+            ["org.example.Alpha", "org.example.Zulu"]
+        );
+    }
+
+    #[test]
+    fn cancelled_and_missing_appstream_commands_are_reported() {
+        let runner =
+            FakeCommandRunner::scripted([output("Identifier: org.example.Alpha [addon]\n")]);
+        let catalog = AppStreamExtensionCatalog::new(Arc::new(runner));
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+        let error = gtk4::glib::MainContext::new()
+            .block_on(catalog.discover(cancellation))
+            .unwrap_err();
+        assert_eq!(error, "command was cancelled");
+
+        let runner = FakeCommandRunner::scripted([Err(CommandError::NotFound {
+            executable: "appstreamcli".into(),
+        })]);
+        let catalog = AppStreamExtensionCatalog::new(Arc::new(runner));
+        let error = gtk4::glib::MainContext::new()
+            .block_on(catalog.discover(CancellationToken::new()))
+            .unwrap_err();
+        assert_eq!(error, "appstreamcli is not installed");
+    }
 }

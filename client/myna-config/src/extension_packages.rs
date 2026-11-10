@@ -813,4 +813,50 @@ mod tests {
         assert_eq!(harness.packages.installs.get(), 0);
         harness.operations.complete(held.token());
     }
+
+    #[test]
+    fn a_non_active_package_is_removed_without_restarting_myna() {
+        let harness = harness("", Ok(()), Ok(()));
+        let outcome = block_on(harness.coordinator.remove(
+            &package(),
+            CancellationToken::new(),
+            no_progress(),
+        ))
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            PackageOperationOutcome::RemovedWithoutActiveProvider
+        );
+        assert!(harness.settings.writes.lock().unwrap().is_empty());
+        assert_eq!(harness.configurator.calls.get(), 0);
+        assert_eq!(harness.packages.removals.get(), 1);
+    }
+
+    #[test]
+    fn a_settings_failure_keeps_the_active_package_installed() {
+        let harness = harness("alpha", Ok(()), Ok(()));
+        *harness.settings.write_error.lock().unwrap() =
+            Some(ClientSettingsError::StoreUnavailable {
+                message: "store is read-only".into(),
+            });
+
+        let error = block_on(harness.coordinator.remove(
+            &package(),
+            CancellationToken::new(),
+            no_progress(),
+        ))
+        .unwrap_err();
+
+        assert!(matches!(error, PackageOperationError::Save(_)));
+        assert_eq!(harness.packages.removals.get(), 0);
+        assert_eq!(harness.configurator.calls.get(), 0);
+        assert!(!harness.coordinator.busy());
+    }
+
+    #[test]
+    fn package_manager_cancellation_is_exposed_as_cancelled() {
+        assert!(PackageManagerError::Cancelled.is_cancelled());
+        assert!(!PackageManagerError::NotFound("alpha".into()).is_cancelled());
+    }
 }

@@ -508,11 +508,18 @@ fn backend_pages_discover_and_apply_against_a_fixture_machine() {
     }
 
     let (store, schemas) = scratch_store("backends");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/bin");
+    let path = format!(
+        "{}:{}",
+        fixtures.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
     let output = Command::new(env!("CARGO_BIN_EXE_myna-config"))
         .env("GSETTINGS_BACKEND", "memory")
         .env("MYNA_PLATFORM", "gnome")
         .env("GSETTINGS_SCHEMA_DIR", &schemas)
         .env("XDG_CONFIG_HOME", &store)
+        .env("PATH", path)
         // Never the live session's bus, where a real daemon would answer.
         .env(
             "DBUS_SESSION_BUS_ADDRESS",

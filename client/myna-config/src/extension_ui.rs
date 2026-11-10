@@ -126,6 +126,13 @@ impl ExtensionUi {
         self.refresh_packages();
     }
 
+    pub(crate) fn active_provider(&self) -> Option<crate::extensions::ActiveProvider> {
+        self.lifecycle.active_provider().ok().flatten().or_else(|| {
+            active_id(&self.lifecycle.controller())
+                .map(|id| crate::extensions::ActiveProvider::broken(&id))
+        })
+    }
+
     fn render(self: &Rc<Self>) {
         self.clear_rows();
         let Some(snapshot) = self.snapshot.borrow().clone() else {
@@ -611,4 +618,106 @@ fn action_error_text(error: &ExtensionActionError) -> Option<String> {
 fn discovery_error_text(detail: &str) -> String {
     gettextrs::gettext("Installed input-method extensions could not be read: {detail}")
         .replace("{detail}", detail)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn package(package_name: &str, installed: bool, provider_ids: &[&str]) -> ExtensionPackage {
+        ExtensionPackage {
+            component_id: format!("org.example.{package_name}"),
+            package_name: package_name.into(),
+            name: package_name.into(),
+            summary: String::new(),
+            installed,
+            provider_ids: provider_ids.iter().map(|id| (*id).into()).collect(),
+        }
+    }
+
+    #[test]
+    fn package_actions_name_their_progress_and_restore_label() {
+        assert_eq!(
+            PackageUiAction::Install.starting_text(),
+            gettextrs::gettext("Installing…")
+        );
+        assert_eq!(
+            PackageUiAction::Remove.starting_text(),
+            gettextrs::gettext("Removing…")
+        );
+        assert_eq!(
+            PackageUiAction::Install.progress_text(&PackageProgress::Percent(42)),
+            gettextrs::gettext("Installing {percent}%").replace("{percent}", "42")
+        );
+        assert_eq!(
+            PackageUiAction::Remove.progress_text(&PackageProgress::Percent(42)),
+            gettextrs::gettext("Removing {percent}%").replace("{percent}", "42")
+        );
+        assert_eq!(
+            PackageUiAction::Remove.progress_text(&PackageProgress::Status("busy".into())),
+            "busy"
+        );
+    }
+
+    #[test]
+    fn a_package_is_found_by_a_declared_provider_or_its_legacy_name() {
+        let declared = package("myna-alpha", true, &["alpha"]);
+        let legacy = package("myna-beta", true, &[]);
+        let unavailable = package("myna-gamma", false, &["gamma"]);
+        let packages = vec![declared, legacy, unavailable];
+
+        assert_eq!(
+            package_for_provider(&packages, "alpha").unwrap().name,
+            "myna-alpha"
+        );
+        assert_eq!(
+            package_for_provider(&packages, "myna-beta").unwrap().name,
+            "myna-beta"
+        );
+        assert!(package_for_provider(&packages, "gamma").is_none());
+        assert!(package_for_provider(&packages, "missing").is_none());
+    }
+
+    #[test]
+    fn status_and_action_errors_are_user_readable() {
+        assert_eq!(
+            status_text(ExtensionStatus::Enabled),
+            gettextrs::gettext("Enabled")
+        );
+        assert_eq!(
+            status_text(ExtensionStatus::Disabled),
+            gettextrs::gettext("Disabled")
+        );
+        assert_eq!(
+            status_text(ExtensionStatus::Unavailable),
+            gettextrs::gettext("The provider cannot be reached right now.")
+        );
+        assert_eq!(
+            status_text(ExtensionStatus::Broken),
+            gettextrs::gettext("This extension is broken and cannot be enabled.")
+        );
+
+        assert!(action_error_text(&ExtensionActionError::Busy).is_none());
+        assert_eq!(
+            action_error_text(&ExtensionActionError::InvalidSelection),
+            Some(gettextrs::gettext(
+                "This input-method extension cannot be enabled."
+            ))
+        );
+        assert_eq!(
+            action_error_text(&ExtensionActionError::Discovery("offline".into())),
+            Some(
+                gettextrs::gettext("Installed input-method extensions could not be read: {detail}")
+                    .replace("{detail}", "offline")
+            )
+        );
+        assert_eq!(
+            action_error_text(&ExtensionActionError::Save("disk full".into())),
+            Some(
+                gettextrs::gettext(
+                    "The input-method extension selection could not be saved: {detail}"
+                )
+                .replace("{detail}", "disk full")
+            )
+        );
+    }
 }

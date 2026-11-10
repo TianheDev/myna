@@ -126,6 +126,9 @@ impl ComponentState {
 pub struct Component {
     pub id: ComponentId,
     pub state: ComponentState,
+    /// The desktop component is an installed provider rather than the
+    /// built-in IBus setup.
+    pub provider: bool,
 }
 
 impl Component {
@@ -452,7 +455,11 @@ pub fn assess(machine: Machine) -> Vec<Component> {
                 ComponentId::InputMethod => ComponentState::of(machine.input_method?),
                 ComponentId::StatusSurface => ComponentState::of(machine.status_surface),
             };
-            Some(Component { id, state })
+            Some(Component {
+                id,
+                state,
+                provider: false,
+            })
         })
         .collect()
 }
@@ -497,6 +504,7 @@ pub fn input_method_holds(status: ComponentStatus) -> bool {
     Component {
         id: ComponentId::InputMethod,
         state: ComponentState::of(status),
+        provider: false,
     }
     .lacks_input_method()
 }
@@ -512,6 +520,23 @@ pub fn input_method_blocker(components: &[Component]) -> Option<Unavailable> {
             ComponentState::Unavailable(why) => Some(why),
             _ => None,
         })
+}
+
+/// Whether the input-method slot is an installed provider rather than the
+/// desktop's built-in IBus setup.
+pub fn input_method_is_provider(components: &[Component]) -> bool {
+    components
+        .iter()
+        .any(|component| component.id == ComponentId::InputMethod && component.provider)
+}
+
+/// Whether the active IM extension needs attention that onboarding cannot
+/// provide. Settings is the only surface that can disable or replace it, so
+/// startup must not trap the user on a component step it cannot complete.
+pub fn provider_needs_settings(components: &[Component]) -> bool {
+    components.iter().any(|component| {
+        component.id == ComponentId::InputMethod && component.provider && !component.satisfied()
+    })
 }
 
 /// What the component step's one button installs, in order: each missing
@@ -889,6 +914,50 @@ mod tests {
         });
         assert!(!can_advance(Step::Components, &components));
         assert!(install_plan(&components).is_empty());
+        assert_eq!(
+            input_method_blocker(&components),
+            Some(Unavailable::Incompatible)
+        );
+
+        let mut provider_missing_core = components;
+        provider_missing_core
+            .iter_mut()
+            .find(|component| component.id == ComponentId::InputMethod)
+            .unwrap()
+            .provider = true;
+        provider_missing_core
+            .iter_mut()
+            .find(|component| component.id == ComponentId::Myna)
+            .unwrap()
+            .state = ComponentState::Missing;
+        assert!(needs_onboarding(&provider_missing_core));
+        assert!(provider_needs_settings(&provider_missing_core));
+    }
+
+    #[test]
+    fn onboarding_keeps_a_provider_distinct_from_the_builtin_input_method() {
+        let mut components = assess(Machine {
+            input_method: Some(ComponentStatus::Active),
+            ..ready()
+        });
+        assert!(!input_method_is_provider(&components));
+        assert!(!provider_needs_settings(&components));
+        components
+            .iter_mut()
+            .find(|component| component.id == ComponentId::InputMethod)
+            .unwrap()
+            .provider = true;
+        assert!(input_method_is_provider(&components));
+        assert!(!provider_needs_settings(&components));
+        assert!(!needs_onboarding(&components));
+
+        components
+            .iter_mut()
+            .find(|component| component.id == ComponentId::InputMethod)
+            .unwrap()
+            .state = ComponentState::Unavailable(Unavailable::Incompatible);
+        assert!(needs_onboarding(&components));
+        assert!(provider_needs_settings(&components));
         assert_eq!(
             input_method_blocker(&components),
             Some(Unavailable::Incompatible)

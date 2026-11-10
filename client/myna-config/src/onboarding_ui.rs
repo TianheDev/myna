@@ -24,10 +24,11 @@ use crate::command::{CancellationToken, GioCommandRunner};
 use crate::domain::BackendSurfaceError;
 use crate::onboarding::{
     assess, can_advance, completes, failed_set_up_step, flag_enabled, forward_leads,
-    input_method_blocker, install_view, installs, model_offer, needs_onboarding, next_install,
-    polls, relogin_pending, remaining_download, seed_spoken_language, set_up_plan, set_up_steps,
-    settled, spoken_language, while_installing, Component, ComponentId, ComponentState,
-    DownloadSize, InstallView, Machine, ModelOffer, Step, Unavailable,
+    input_method_blocker, input_method_is_provider, install_view, installs, model_offer,
+    needs_onboarding, next_install, polls, relogin_pending, remaining_download,
+    seed_spoken_language, set_up_plan, set_up_steps, settled, spoken_language, while_installing,
+    Component, ComponentId, ComponentState, DownloadSize, InstallView, Machine, ModelOffer, Step,
+    Unavailable,
 };
 use crate::ports::{
     BackendRepository, ClientSettings, SystemConfigurator, SystemConfiguratorError,
@@ -141,7 +142,9 @@ impl OnboardingUi {
                 Arc::new(UnixSocketSnapdClient::new()),
             )),
             Rc::new(PkexecSystemConfigurator::new(runner)),
-            crate::platform::Platform::current().components(),
+            crate::extensions::provider_aware_components(
+                crate::platform::Platform::current().components(),
+            ),
             open_settings(),
             || myna_core::locale::preferred_languages(&myna_core::locale::SystemLocale::default()),
             Opener::FirstRun,
@@ -919,6 +922,14 @@ impl OnboardingUi {
             _ => None,
         };
         let input_method = input_method_blocker(components).filter(|_| !self.busy.get());
+        let provider_input = input_method_is_provider(components)
+            .then(|| {
+                components.iter().find(|component| {
+                    component.id == ComponentId::InputMethod && !component.satisfied()
+                })
+            })
+            .flatten()
+            .filter(|_| !self.busy.get());
         let size = match model.filter(|_| offer) {
             Some(model) => match remaining_download(components, &model) {
                 DownloadSize::Exact(0) => String::new(),
@@ -940,7 +951,17 @@ impl OnboardingUi {
             busy.as_ref().map(|(step, _)| step.as_str()),
             &size,
         ));
-        let note = if input_method == Some(Unavailable::Incompatible) {
+        let note = if provider_input.is_some_and(|component| {
+            component.state == ComponentState::Unavailable(Unavailable::Incompatible)
+        }) {
+            gettextrs::gettext(
+                "The selected input-method extension is broken. Reinstall or update it in Myna Settings.",
+            )
+        } else if provider_input.is_some() {
+            gettextrs::gettext(
+                "The selected input-method extension is unavailable. Start its input-method framework, or manage the extension in Myna Settings.",
+            )
+        } else if input_method == Some(Unavailable::Incompatible) {
             gettextrs::gettext(
                 "Another input method is in use, and Dictation types through IBus. Choose IBus in the system settings.",
             )
@@ -957,7 +978,9 @@ impl OnboardingUi {
         };
         page.show_status(match &busy {
             Some((_, text)) => ui::ComponentsStatus::Busy(text),
-            None if failed || input_method.is_some() => ui::ComponentsStatus::Warning(&note),
+            None if failed || input_method.is_some() || provider_input.is_some() => {
+                ui::ComponentsStatus::Warning(&note)
+            }
             None if note.is_empty() => ui::ComponentsStatus::Hidden,
             None => ui::ComponentsStatus::Note(&note),
         });
@@ -1328,14 +1351,25 @@ async fn read_machine(
         user_daemons,
         ..Machine::new(&installed, backends)
     };
+    let mut input_method_provider = false;
     for component in desktop.required() {
         let status = desktop.status(&component.id).await;
         match component.purpose {
             Purpose::StatusSurface => machine.status_surface = status,
-            Purpose::TextInput => machine.input_method = Some(status),
+            Purpose::TextInput => {
+                machine.input_method = Some(status);
+                input_method_provider = component.id != crate::platform::host::IBUS;
+            }
         }
     }
-    (assess(machine), problem)
+    let mut components = assess(machine);
+    if let Some(input_method) = components
+        .iter_mut()
+        .find(|component| component.id == ComponentId::InputMethod)
+    {
+        input_method.provider = input_method_provider;
+    }
+    (components, problem)
 }
 
 /// What snap said, which names the cause, over how it exited.

@@ -926,6 +926,18 @@ msgstr ""
 msgid "Close Myna Settings."
 msgstr ""
 
+#: src/onboarding_ui.rs:958
+msgid ""
+"The selected input-method extension is broken. Reinstall or update it in "
+"Myna Settings."
+msgstr ""
+
+#: src/onboarding_ui.rs:962
+msgid ""
+"The selected input-method extension is unavailable. Start its input-method "
+"framework, or manage the extension in Myna Settings."
+msgstr ""
+
 #: src/onboarding_ui.rs:945 src/diagnostics.rs:658
 msgid ""
 "Another input method is in use, and Dictation types through IBus. Choose "
@@ -1160,6 +1172,50 @@ msgstr ""
 msgid "of the last 10 s stalled"
 msgstr ""
 
+#: src/diagnostics.rs:421
+msgid ""
+"{provider} is unavailable. Start its input method framework and make sure "
+"the extension is installed."
+msgstr ""
+
+#: src/diagnostics.rs:427
+msgid ""
+"{provider} is disabled. Enable it in Myna Settings or choose another "
+"provider."
+msgstr ""
+
+#: src/diagnostics.rs:433
+msgid ""
+"{provider} is broken. Reinstall or update the extension in Myna Settings."
+msgstr ""
+
+#: src/diagnostics.rs:441
+msgid ""
+"IBus is not installed, so Myna cannot type. Install the “ibus” package, then "
+"log out and back in."
+msgstr ""
+
+#: src/diagnostics.rs:446
+msgid ""
+"IBus is not set up, so Myna cannot type. Set up Dictation to turn it on."
+msgstr ""
+
+#: src/diagnostics.rs:460
+msgid "enabled"
+msgstr ""
+
+#: src/diagnostics.rs:462
+msgid "unavailable: provider socket is not available"
+msgstr ""
+
+#: src/diagnostics.rs:464
+msgid "disabled"
+msgstr ""
+
+#: src/diagnostics.rs:466
+msgid "broken: manifest is invalid or provider is missing"
+msgstr ""
+
 #: src/diagnostics.rs:408
 msgid "No model connected"
 msgstr ""
@@ -1315,17 +1371,6 @@ msgstr ""
 
 #: src/diagnostics.rs:649
 msgid "Problems"
-msgstr ""
-
-#: src/diagnostics.rs:655
-msgid ""
-"IBus is not installed, so Myna cannot type. Install the “ibus” package, then "
-"log out and back in."
-msgstr ""
-
-#: src/diagnostics.rs:660
-msgid ""
-"IBus is not set up, so Myna cannot type. Set up Dictation to turn it on."
 msgstr ""
 
 #: src/diagnostics.rs:671 src/diagnostics.rs:685
@@ -1522,6 +1567,11 @@ msgstr ""
 
 #: src/extension_ui.rs:611
 msgid "Installed input-method extensions could not be read: {detail}"
+msgstr ""
+
+#. TRANSLATORS: {percent} is how much of the download has arrived, a number from 0 to 100.
+#: src/ui/install_control.rs:131
+msgid "Installing {percent}%"
 msgstr ""
 
 #: src/adapters/packagekit.rs:502
@@ -1859,11 +1909,6 @@ msgstr ""
 msgid "This model provides no description for this setting."
 msgstr ""
 
-#. TRANSLATORS: {percent} is how much of the download has arrived, a number from 0 to 100.
-#: src/ui/install_control.rs:131
-msgid "Installing {percent}%"
-msgstr ""
-
 #: ../data/glib-2.0/schemas/com.canonical.Myna.Dictation.gschema.xml:41
 msgid "Sounds on start, stop and error"
 msgstr ""
@@ -1907,10 +1952,20 @@ msgid ""
 msgstr ""
 
 #: ../data/glib-2.0/schemas/com.canonical.Myna.Dictation.gschema.xml:80
-msgid "Indicator style"
+msgid "Active input-method extension"
 msgstr ""
 
 #: ../data/glib-2.0/schemas/com.canonical.Myna.Dictation.gschema.xml:81
+msgid ""
+"The explicitly selected provider id for an installed IM extension. Empty "
+"keeps Myna using its built-in IBus input method."
+msgstr ""
+
+#: ../data/glib-2.0/schemas/com.canonical.Myna.Dictation.gschema.xml:89
+msgid "Indicator style"
+msgstr ""
+
+#: ../data/glib-2.0/schemas/com.canonical.Myna.Dictation.gschema.xml:90
 msgid ""
 "All three render the same calibrated audio envelope: Default is a level bar "
 "in the accent colour, Ribbon a flowing GPU wave, VU meter a segmented meter."

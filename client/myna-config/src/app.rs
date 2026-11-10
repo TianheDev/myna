@@ -1420,10 +1420,15 @@ fn build_window(application: &adw::Application) {
                 std::sync::Arc::new(crate::adapters::snapd_client::UnixSocketSnapdClient::new()),
             ),
             &crate::adapters::system_configurator::PkexecSystemConfigurator::new(runner),
-            crate::platform::Platform::current().components().as_ref(),
+            crate::extensions::provider_aware_components(
+                crate::platform::Platform::current().components(),
+            )
+            .as_ref(),
         )
         .await;
-        if needs_onboarding(&components) {
+        if crate::onboarding::provider_needs_settings(&components) {
+            build_settings_window(&application);
+        } else if needs_onboarding(&components) {
             crate::onboarding_ui::OnboardingUi::present(&application, components);
         } else {
             build_settings_window(&application);

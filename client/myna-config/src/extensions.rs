@@ -13,8 +13,11 @@ use thiserror::Error;
 use crate::command::CancellationToken;
 use crate::myna_settings::{MynaSettingsController, PersistenceRequest};
 use crate::operation_gate::{BeginOperationError, OperationCoordinator, OperationKind};
-use crate::ports::SystemConfigurator;
+use crate::ports::{ClientSettings, SystemConfigurator};
 use myna_core::settings::KEY_INPUT_METHOD_EXTENSION;
+use myna_platform::components::{
+    Blocker, Component, ComponentError, ComponentStatus, Components, Purpose, StepKind,
+};
 
 pub const MANIFEST_VERSION: u32 = 1;
 pub const MANIFEST_SUFFIX: &str = ".input-method.json";
@@ -93,6 +96,50 @@ impl ExtensionSnapshot {
         self.entries
             .iter()
             .find(|entry| entry.status == ExtensionStatus::Enabled)
+    }
+
+    /// The provider `active_id` selects. A selection whose manifest has
+    /// disappeared is broken rather than absent: it must not silently make
+    /// Myna fall back to IBus.
+    pub fn active_provider(&self, active_id: Option<&str>) -> Option<ActiveProvider> {
+        let id = active_id?;
+        Some(
+            self.entries
+                .iter()
+                .find(|entry| entry.id == id)
+                .map(ActiveProvider::from)
+                .unwrap_or_else(|| ActiveProvider::broken(id)),
+        )
+    }
+}
+
+/// The explicitly selected provider, as onboarding and Diagnostics describe
+/// it. `ExtensionStatus` is the registry's existing vocabulary, not a second
+/// provider-state model.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActiveProvider {
+    pub id: String,
+    pub name: String,
+    pub status: ExtensionStatus,
+}
+
+impl ActiveProvider {
+    pub(crate) fn broken(id: &str) -> Self {
+        Self {
+            id: id.to_owned(),
+            name: id.to_owned(),
+            status: ExtensionStatus::Broken,
+        }
+    }
+}
+
+impl From<&ExtensionEntry> for ActiveProvider {
+    fn from(entry: &ExtensionEntry) -> Self {
+        Self {
+            id: entry.id.clone(),
+            name: entry.name.clone(),
+            status: entry.status,
+        }
     }
 }
 
@@ -215,6 +262,115 @@ impl ExtensionManager {
                     )
             }))
     }
+
+    pub fn active_provider(
+        &self,
+        active_id: Option<&str>,
+    ) -> Result<Option<ActiveProvider>, String> {
+        let Some(id) = active_id else {
+            return Ok(None);
+        };
+        Ok(Some(
+            self.snapshot(active_id)?
+                .active_provider(Some(id))
+                .expect("a non-empty active id has a provider"),
+        ))
+    }
+}
+
+/// A desktop's components with the active provider in place of its built-in
+/// text-input component. With no active provider every call delegates
+/// unchanged, so the existing IBus path remains the default.
+pub struct InputMethodComponents {
+    desktop: Rc<dyn Components>,
+    manager: ExtensionManager,
+    settings: Rc<dyn ClientSettings>,
+}
+
+impl InputMethodComponents {
+    pub fn new(
+        desktop: Rc<dyn Components>,
+        registry: Rc<dyn ExtensionRegistry>,
+        settings: Rc<dyn ClientSettings>,
+    ) -> Self {
+        Self {
+            desktop,
+            manager: ExtensionManager::new(registry),
+            settings,
+        }
+    }
+
+    fn active_provider(&self) -> Option<ActiveProvider> {
+        let active = selected_provider(self.settings.as_ref()).ok().flatten()?;
+        self.manager
+            .active_provider(Some(&active))
+            .unwrap_or_else(|_| Some(ActiveProvider::broken(&active)))
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Components for InputMethodComponents {
+    fn required(&self) -> Vec<Component> {
+        let Some(provider) = self.active_provider() else {
+            return self.desktop.required();
+        };
+        let mut required = self.desktop.required();
+        let provider_component = Component {
+            id: provider.id,
+            purpose: Purpose::TextInput,
+        };
+        if let Some(input) = required
+            .iter_mut()
+            .find(|component| component.purpose == Purpose::TextInput)
+        {
+            *input = provider_component;
+        } else {
+            let status_surface = required
+                .iter()
+                .position(|component| component.purpose == Purpose::StatusSurface)
+                .unwrap_or(required.len());
+            required.insert(status_surface, provider_component);
+        }
+        required
+    }
+
+    async fn status(&self, id: &str) -> ComponentStatus {
+        let Some(provider) = self.active_provider().filter(|provider| provider.id == id) else {
+            return self.desktop.status(id).await;
+        };
+        match provider.status {
+            ExtensionStatus::Enabled => ComponentStatus::Active,
+            ExtensionStatus::Disabled => ComponentStatus::Inactive,
+            ExtensionStatus::Unavailable => ComponentStatus::Unavailable,
+            ExtensionStatus::Broken => ComponentStatus::Blocked(Blocker::Incompatible),
+        }
+    }
+
+    async fn enable(&self, id: &str) -> Result<(), ComponentError> {
+        let Some(provider) = self.active_provider().filter(|provider| provider.id == id) else {
+            return self.desktop.enable(id).await;
+        };
+        Err(ComponentError::Failed {
+            kind: StepKind::Setting,
+            step: KEY_INPUT_METHOD_EXTENSION.to_owned(),
+            message: format!(
+                "the input-method extension {} is managed in Myna Settings",
+                provider.id
+            ),
+        })
+    }
+}
+
+fn selected_provider(settings: &dyn ClientSettings) -> Result<Option<String>, String> {
+    settings
+        .get(KEY_INPUT_METHOD_EXTENSION)
+        .map_err(|error| error.to_string())
+        .map(|value| {
+            value
+                .as_str()
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned)
+        })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -299,6 +455,13 @@ impl ExtensionLifecycle {
         let active = active_id(&self.controller);
         self.manager
             .snapshot(active.as_deref())
+            .map_err(ExtensionActionError::Discovery)
+    }
+
+    pub fn active_provider(&self) -> Result<Option<ActiveProvider>, ExtensionActionError> {
+        let active = active_id(&self.controller);
+        self.manager
+            .active_provider(active.as_deref())
             .map_err(ExtensionActionError::Discovery)
     }
 
@@ -483,6 +646,27 @@ impl ExtensionRegistry for SystemExtensionRegistry {
     }
 }
 
+/// The session's desktop components with the installed provider registry and
+/// shared settings store attached. A failure to open the settings store keeps
+/// the desktop's existing behaviour and is logged rather than guessed at.
+pub fn provider_aware_components(desktop: Rc<dyn Components>) -> Rc<dyn Components> {
+    let settings = match crate::adapters::client_settings::GioClientSettings::open() {
+        Ok(settings) => Rc::new(settings) as Rc<dyn ClientSettings>,
+        Err(error) => {
+            gio::glib::g_warning!(
+                crate::LOG_DOMAIN,
+                "cannot read the active input-method provider: {error}"
+            );
+            return desktop;
+        }
+    };
+    Rc::new(InputMethodComponents::new(
+        desktop,
+        Rc::new(SystemExtensionRegistry::system()),
+        settings,
+    ))
+}
+
 fn read_manifest(path: &Path) -> Result<ProviderManifest, String> {
     let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
     if metadata.len() > MAX_MANIFEST_BYTES {
@@ -614,6 +798,14 @@ mod tests {
             .snapshot(Some("missing"))
             .unwrap();
         assert_eq!(snapshot.stale_active.as_deref(), Some("missing"));
+        assert_eq!(
+            snapshot.active_provider(Some("missing")),
+            Some(ActiveProvider {
+                id: "missing".into(),
+                name: "missing".into(),
+                status: ExtensionStatus::Broken,
+            })
+        );
         assert!(snapshot.entries.is_empty());
     }
 
@@ -675,6 +867,51 @@ mod tests {
     }
 
     #[test]
+    fn every_manifest_field_is_validated_before_a_provider_is_usable() {
+        let mut mismatched_file = manifest("alpha");
+        mismatched_file.id = "alpha".into();
+        let mut unsafe_id = manifest("alpha");
+        unsafe_id.id = "../alpha".into();
+        let mut empty_name = manifest("alpha");
+        empty_name.name.clear();
+        let mut long_name = manifest("alpha");
+        long_name.name = "x".repeat(129);
+        let mut wrong_schema = manifest("alpha");
+        wrong_schema.schema_version = 2;
+        let mut no_protocols = manifest("alpha");
+        no_protocols.protocols.clear();
+        let mut unsupported_protocol = manifest("alpha");
+        unsupported_protocol.protocols = vec![2];
+        let mut wrong_socket = manifest("alpha");
+        wrong_socket.socket = "other.sock".into();
+        let mut insecure = manifest("alpha");
+        insecure.capabilities.secure_field_detection = false;
+
+        for (file_id, manifest) in [
+            ("other", mismatched_file),
+            ("alpha", unsafe_id),
+            ("alpha", empty_name),
+            ("alpha", long_name),
+            ("alpha", wrong_schema),
+            ("alpha", no_protocols),
+            ("alpha", unsupported_protocol),
+            ("alpha", wrong_socket),
+            ("alpha", insecure),
+        ] {
+            let snapshot = ExtensionManager::new(registry(
+                vec![ManifestRecord {
+                    file_id: file_id.into(),
+                    manifest: Ok(manifest),
+                }],
+                &["alpha"],
+            ))
+            .snapshot(None)
+            .unwrap();
+            assert_eq!(snapshot.entries[0].status, ExtensionStatus::Broken);
+        }
+    }
+
+    #[test]
     fn the_system_adapter_ignores_unrelated_files_and_reads_valid_manifests() {
         let directory = std::env::temp_dir().join(format!(
             "myna-extension-manifest-{}-{:?}",
@@ -717,6 +954,174 @@ mod tests {
         assert!(entry.selected);
         assert!(entry.can_toggle());
         assert!(snapshot.stale_active.is_none());
+    }
+
+    struct FakeDesktop {
+        enabled: RefCell<Vec<String>>,
+    }
+
+    impl Default for FakeDesktop {
+        fn default() -> Self {
+            Self {
+                enabled: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait(?Send)]
+    impl Components for FakeDesktop {
+        fn required(&self) -> Vec<Component> {
+            vec![
+                Component {
+                    id: "ibus".into(),
+                    purpose: Purpose::TextInput,
+                },
+                Component {
+                    id: "indicator".into(),
+                    purpose: Purpose::StatusSurface,
+                },
+            ]
+        }
+
+        async fn status(&self, id: &str) -> ComponentStatus {
+            if id == "ibus" {
+                ComponentStatus::Active
+            } else {
+                ComponentStatus::Unavailable
+            }
+        }
+
+        async fn enable(&self, id: &str) -> Result<(), ComponentError> {
+            self.enabled.borrow_mut().push(id.to_owned());
+            Ok(())
+        }
+    }
+
+    fn provider_components(
+        records: Vec<ManifestRecord>,
+        sockets: &[&str],
+        active: &str,
+    ) -> (InputMethodComponents, Rc<FakeDesktop>) {
+        let desktop = Rc::new(FakeDesktop::default());
+        let (settings, _) = settings_controller(active);
+        (
+            InputMethodComponents::new(
+                Rc::clone(&desktop) as Rc<dyn Components>,
+                registry(records, sockets),
+                Rc::clone(&settings) as Rc<dyn ClientSettings>,
+            ),
+            desktop,
+        )
+    }
+
+    #[test]
+    fn an_enabled_provider_replaces_the_desktops_ibus_component() {
+        let (components, desktop) = provider_components(
+            vec![ManifestRecord {
+                file_id: "alpha".into(),
+                manifest: Ok(manifest("alpha")),
+            }],
+            &["alpha"],
+            "alpha",
+        );
+        assert_eq!(
+            components.required(),
+            [
+                Component {
+                    id: "alpha".into(),
+                    purpose: Purpose::TextInput,
+                },
+                Component {
+                    id: "indicator".into(),
+                    purpose: Purpose::StatusSurface,
+                },
+            ]
+        );
+        assert_eq!(
+            gtk4::glib::MainContext::new().block_on(components.status("alpha")),
+            ComponentStatus::Active
+        );
+        assert!(matches!(
+            gtk4::glib::MainContext::new().block_on(components.enable("alpha")),
+            Err(ComponentError::Failed {
+                kind: StepKind::Setting,
+                ..
+            })
+        ));
+        assert!(desktop.enabled.borrow().is_empty());
+    }
+
+    #[test]
+    fn an_unavailable_or_broken_provider_never_falls_back_to_ibus() {
+        for (records, sockets, expected) in [
+            (
+                vec![ManifestRecord {
+                    file_id: "alpha".into(),
+                    manifest: Ok(manifest("alpha")),
+                }],
+                Vec::new(),
+                ComponentStatus::Unavailable,
+            ),
+            (
+                vec![ManifestRecord {
+                    file_id: "alpha".into(),
+                    manifest: Err("bad json".into()),
+                }],
+                vec!["alpha"],
+                ComponentStatus::Blocked(Blocker::Incompatible),
+            ),
+        ] {
+            let (components, desktop) = provider_components(records, &sockets, "alpha");
+            assert_eq!(
+                components.required()[0],
+                Component {
+                    id: "alpha".into(),
+                    purpose: Purpose::TextInput,
+                }
+            );
+            assert_eq!(
+                gtk4::glib::MainContext::new().block_on(components.status("alpha")),
+                expected
+            );
+            assert_eq!(
+                gtk4::glib::MainContext::new().block_on(components.status("ibus")),
+                ComponentStatus::Active
+            );
+            assert!(desktop.enabled.borrow().is_empty());
+        }
+    }
+
+    #[test]
+    fn no_active_provider_delegates_every_component_unchanged() {
+        let (components, desktop) = provider_components(
+            vec![ManifestRecord {
+                file_id: "alpha".into(),
+                manifest: Ok(manifest("alpha")),
+            }],
+            &["alpha"],
+            "",
+        );
+        assert_eq!(
+            components.required(),
+            [
+                Component {
+                    id: "ibus".into(),
+                    purpose: Purpose::TextInput,
+                },
+                Component {
+                    id: "indicator".into(),
+                    purpose: Purpose::StatusSurface,
+                },
+            ]
+        );
+        assert_eq!(
+            gtk4::glib::MainContext::new().block_on(components.status("ibus")),
+            ComponentStatus::Active
+        );
+        gtk4::glib::MainContext::new()
+            .block_on(components.enable("ibus"))
+            .unwrap();
+        assert_eq!(*desktop.enabled.borrow(), ["ibus"]);
     }
 
     struct FakeSettings {

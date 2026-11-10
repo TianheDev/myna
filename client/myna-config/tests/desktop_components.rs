@@ -3,12 +3,21 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use myna_config::command::{CommandError, CommandOutput, FakeCommandRunner};
+use myna_config::domain::ClientSettingValue;
+use myna_config::extensions::{
+    ExtensionRegistry, InputMethodComponents, ManifestCapabilities, ManifestRecord,
+    ProviderManifest,
+};
 use myna_config::platform::host::{Host, HUD_HOST_AUTOSTART, IBUS};
 use myna_config::platform::kde::components::KdeComponents;
 use myna_config::platform::xfce::components::XfceComponents;
+use myna_config::ports::{
+    ClientSettings, ClientSettingsCallback, ClientSettingsError, ClientSettingsSubscription,
+};
 use myna_platform::components::{
     Blocker, ComponentError, ComponentStatus, Components, Purpose, StepKind,
 };
@@ -155,6 +164,79 @@ fn args(runner: &FakeCommandRunner) -> Vec<Vec<String>> {
         .collect()
 }
 
+struct StaticRegistry {
+    provider: ProviderManifest,
+    socket: bool,
+}
+
+impl ExtensionRegistry for StaticRegistry {
+    fn records(&self) -> Result<Vec<ManifestRecord>, String> {
+        Ok(vec![ManifestRecord {
+            file_id: self.provider.id.clone(),
+            manifest: Ok(self.provider.clone()),
+        }])
+    }
+
+    fn socket_present(&self, id: &str) -> bool {
+        self.socket && id == self.provider.id
+    }
+}
+
+struct StaticSettings(String);
+
+struct NoSubscription;
+impl ClientSettingsSubscription for NoSubscription {}
+
+impl ClientSettings for StaticSettings {
+    fn list(&self) -> Result<Vec<myna_config::domain::ClientSettingMetadata>, ClientSettingsError> {
+        Ok(Vec::new())
+    }
+
+    fn get(&self, _key: &str) -> Result<ClientSettingValue, ClientSettingsError> {
+        Ok(ClientSettingValue::Text(self.0.clone()))
+    }
+
+    fn set(&self, _key: &str, _value: ClientSettingValue) -> Result<(), ClientSettingsError> {
+        Ok(())
+    }
+
+    fn has_user_value(&self, _key: &str) -> Result<bool, ClientSettingsError> {
+        Ok(!self.0.is_empty())
+    }
+
+    fn subscribe(
+        &self,
+        _callback: ClientSettingsCallback,
+    ) -> Result<Box<dyn ClientSettingsSubscription>, ClientSettingsError> {
+        Ok(Box::new(NoSubscription))
+    }
+}
+
+fn selected_provider_components(
+    desktop: Rc<dyn Components>,
+    socket: bool,
+) -> InputMethodComponents {
+    InputMethodComponents::new(
+        desktop,
+        Rc::new(StaticRegistry {
+            provider: ProviderManifest {
+                schema_version: 1,
+                id: "example".into(),
+                name: "Example input method".into(),
+                protocols: vec![1],
+                socket: "example.sock".into(),
+                capabilities: ManifestCapabilities {
+                    preedit: true,
+                    surrounding_text: false,
+                    secure_field_detection: true,
+                },
+            },
+            socket,
+        }),
+        Rc::new(StaticSettings("example".into())),
+    )
+}
+
 #[test]
 fn xfce_and_plasma_need_ibus_and_a_host_for_the_indicator() {
     let session = Session::ibus("required");
@@ -273,6 +355,73 @@ fn another_input_method_is_left_alone() {
     let runner = FakeCommandRunner::default();
     assert!(block_on(session.components(&runner).enable(IBUS)).is_err());
     assert!(runner.calls().is_empty());
+}
+
+#[test]
+fn an_active_provider_replaces_ibus_on_xfce_and_plasma() {
+    let session = Session::ibus("provider").without_session_env();
+    session.xinputrc("run_im fcitx5\n");
+    session.kwinrc(
+        "user",
+        "[Wayland]\nInputMethod[$e]=/usr/share/applications/org.fcitx.Fcitx5.desktop\n",
+    );
+    let desktops: [Rc<dyn Components>; 2] = [
+        Rc::new(session.components(&FakeCommandRunner::default())),
+        Rc::new(session.kde(&FakeCommandRunner::default())),
+    ];
+    for desktop in desktops {
+        assert_eq!(
+            block_on(desktop.status(IBUS)),
+            ComponentStatus::Blocked(Blocker::Incompatible)
+        );
+
+        let runner = FakeCommandRunner::default();
+        let components = selected_provider_components(desktop, true);
+        assert_eq!(
+            components.required(),
+            [
+                myna_platform::components::Component {
+                    id: "example".into(),
+                    purpose: Purpose::TextInput,
+                },
+                myna_platform::components::Component {
+                    id: HUD_HOST_AUTOSTART.into(),
+                    purpose: Purpose::StatusSurface,
+                },
+            ]
+        );
+        assert_eq!(
+            block_on(components.status("example")),
+            ComponentStatus::Active
+        );
+        assert!(matches!(
+            block_on(components.enable("example")),
+            Err(ComponentError::Failed {
+                kind: StepKind::Setting,
+                ..
+            })
+        ));
+        assert!(runner.calls().is_empty());
+    }
+}
+
+#[test]
+fn a_selected_provider_that_is_not_listening_does_not_fall_back_to_ibus() {
+    let session = Session::ibus("provider-unavailable").without_session_env();
+    session.xinputrc("run_im fcitx5\n");
+    let desktop = Rc::new(session.components(&FakeCommandRunner::default()));
+    let components = selected_provider_components(desktop, false);
+    assert_eq!(
+        components.required()[0],
+        myna_platform::components::Component {
+            id: "example".into(),
+            purpose: Purpose::TextInput,
+        }
+    );
+    assert_eq!(
+        block_on(components.status("example")),
+        ComponentStatus::Unavailable
+    );
 }
 
 #[test]

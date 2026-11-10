@@ -1504,7 +1504,9 @@ impl BackendUi {
         let gate = gate.clone();
         let window = window.clone();
         glib::spawn_future_local(async move {
-            let desktop = crate::platform::Platform::current().components();
+            let desktop = crate::extensions::provider_aware_components(
+                crate::platform::Platform::current().components(),
+            );
             let components = crate::onboarding_ui::assess_machine(
                 repository.as_ref(),
                 configurator.as_ref(),
@@ -2160,6 +2162,11 @@ impl BackendUi {
         let pages = self.controller.pages();
         let discovery_error = self.controller.last_discovery_error();
         let snaps = self.installed_snaps.borrow().clone();
+        let input_method = self
+            .extension_ui
+            .borrow()
+            .as_ref()
+            .and_then(|extensions| extensions.active_provider());
         let host = self.host.borrow().clone();
         let (system, machine, daemon, daemon_report, desktop) = match host {
             Some(host) => (
@@ -2185,6 +2192,7 @@ impl BackendUi {
             daemon,
             daemon_report,
             extension: desktop.extension,
+            input_method,
             desktop: desktop.components,
             performance: self.performance.borrow().clone(),
             backends: pages
@@ -3533,7 +3541,10 @@ struct HostFacts {
 
 /// Blocks on /proc and on the session bus: only for the blocking pool.
 fn host_facts() -> HostFacts {
-    let desktop = crate::platform::Platform::current().diagnostics();
+    let components = crate::extensions::provider_aware_components(
+        crate::platform::Platform::current().components(),
+    );
+    let desktop = crate::platform::Platform::current().diagnostics_with(components);
     HostFacts {
         system: crate::machine::system_facts(desktop.shell.clone(), Vec::new()),
         machine: crate::machine::machine_facts(),

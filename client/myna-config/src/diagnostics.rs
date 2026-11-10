@@ -10,6 +10,7 @@
 
 use std::time::Duration;
 
+use crate::extensions::{ActiveProvider, ExtensionStatus};
 use crate::machine::{
     bytes, AudioDrops, DaemonReport, InputLevels, InputReport, LastError, MachineFacts,
     ProcessMemory, SystemFacts,
@@ -84,6 +85,9 @@ pub struct DiagnosticInput {
     pub daemon_report: Option<DaemonReport>,
     /// Which copy of the shell extension runs; `None` when not read.
     pub extension: Option<ExtensionReport>,
+    /// The explicitly selected input-method provider; `None` means Myna uses
+    /// its built-in IBus backend.
+    pub input_method: Option<ActiveProvider>,
     /// The desktop's other pieces, where it has no extension to report on.
     pub desktop: Vec<crate::platform::ComponentFact>,
     /// `None` until the probe has run once; the report says so rather than
@@ -385,6 +389,13 @@ fn classify_onboarding(input: &DiagnosticInput) -> OnboardingState {
     {
         return OnboardingState::NoModelConnected;
     }
+    if input
+        .input_method
+        .as_ref()
+        .is_some_and(|provider| provider.status != ExtensionStatus::Enabled)
+    {
+        return OnboardingState::NoInputMethod;
+    }
     if input_method_held(input).is_some() {
         return OnboardingState::NoInputMethod;
     }
@@ -398,6 +409,64 @@ fn input_method_held(input: &DiagnosticInput) -> Option<ComponentStatus> {
         .iter()
         .find(|fact| fact.purpose == Purpose::TextInput && input_method_holds(fact.status))
         .map(|fact| fact.status)
+}
+
+fn input_method_problem(input: &DiagnosticInput) -> Option<String> {
+    if let Some(provider) = &input.input_method {
+        let label = provider_label(provider);
+        return match provider.status {
+            ExtensionStatus::Enabled => None,
+            ExtensionStatus::Unavailable => Some(
+                gettextrs::gettext(
+                    "{provider} is unavailable. Start its input method framework and make sure the extension is installed.",
+                )
+                .replace("{provider}", &label),
+            ),
+            ExtensionStatus::Disabled => Some(
+                gettextrs::gettext(
+                    "{provider} is disabled. Enable it in Myna Settings or choose another provider.",
+                )
+                .replace("{provider}", &label),
+            ),
+            ExtensionStatus::Broken => Some(
+                gettextrs::gettext(
+                    "{provider} is broken. Reinstall or update the extension in Myna Settings.",
+                )
+                .replace("{provider}", &label),
+            ),
+        };
+    }
+    input_method_held(input).map(|status| match status {
+        ComponentStatus::Unavailable => gettextrs::gettext(
+            "IBus is not installed, so Myna cannot type. Install the “ibus” package, then log out and back in.",
+        ),
+        ComponentStatus::Blocked(_) => gettextrs::gettext(
+            "Another input method is in use, and Dictation types through IBus. Choose IBus in the system settings.",
+        ),
+        _ => gettextrs::gettext("IBus is not set up, so Myna cannot type. Set up Dictation to turn it on."),
+    })
+}
+
+fn provider_label(provider: &ActiveProvider) -> String {
+    if provider.name == provider.id {
+        provider.id.clone()
+    } else {
+        format!("{} ({})", provider.name, provider.id)
+    }
+}
+
+fn active_provider_summary(provider: &ActiveProvider) -> String {
+    let status = match provider.status {
+        ExtensionStatus::Enabled => gettextrs::gettext("enabled"),
+        ExtensionStatus::Unavailable => {
+            gettextrs::gettext("unavailable: provider socket is not available")
+        }
+        ExtensionStatus::Disabled => gettextrs::gettext("disabled"),
+        ExtensionStatus::Broken => {
+            gettextrs::gettext("broken: manifest is invalid or provider is missing")
+        }
+    };
+    format!("{} - {status}", provider_label(provider))
 }
 
 /// Localized, user-facing label for an onboarding state.
@@ -592,7 +661,17 @@ fn render_body(
             &extension_summary(extension),
         );
     }
+    if let Some(provider) = &input.input_method {
+        field(
+            &mut out,
+            &gettextrs::gettext("Input method"),
+            &active_provider_summary(provider),
+        );
+    }
     for fact in &input.desktop {
+        if input.input_method.is_some() && fact.purpose == Purpose::TextInput {
+            continue;
+        }
         field(
             &mut out,
             &component_label(fact.purpose),
@@ -650,15 +729,7 @@ fn render_body(
     out.push_str(":\n");
     let not_connected = (onboarding == OnboardingState::NoModelConnected)
         .then(|| gettextrs::gettext("No model is connected. Choose one to use for dictation."));
-    let no_input_method = input_method_held(input).map(|status| match status {
-        ComponentStatus::Unavailable => gettextrs::gettext(
-            "IBus is not installed, so Myna cannot type. Install the “ibus” package, then log out and back in.",
-        ),
-        ComponentStatus::Blocked(_) => gettextrs::gettext(
-            "Another input method is in use, and Dictation types through IBus. Choose IBus in the system settings.",
-        ),
-        _ => gettextrs::gettext("IBus is not set up, so Myna cannot type. Set up Dictation to turn it on."),
-    });
+    let no_input_method = input_method_problem(input);
     let problems: Vec<&String> = input
         .problems
         .iter()
@@ -1280,6 +1351,74 @@ mod tests {
     }
 
     #[test]
+    fn an_active_provider_is_named_and_reported_by_its_own_state() {
+        use crate::platform::ComponentFact;
+        let provider = |status| ActiveProvider {
+            id: "example".into(),
+            name: "Example input method".into(),
+            status,
+        };
+        let input = |status, component| DiagnosticInput {
+            inventory_complete: true,
+            installed_snaps: vec![InstalledSnap {
+                name: "myna".into(),
+                version: "0.1.0".into(),
+            }],
+            backends: vec![BackendDiagnostic {
+                snap_name: "myna-parakeet".into(),
+                connection: DiagnosticConnection::Connected,
+                ..BackendDiagnostic::default()
+            }],
+            input_method: Some(provider(status)),
+            desktop: vec![ComponentFact {
+                purpose: Purpose::TextInput,
+                status: component,
+            }],
+            ..DiagnosticInput::default()
+        };
+
+        let report = present_diagnostics(input(ExtensionStatus::Enabled, ComponentStatus::Active));
+        assert_eq!(report.onboarding(), OnboardingState::Ready);
+        let text = report.copy_text();
+        assert_eq!(
+            field_value(&text, "Input method"),
+            Some("Example input method (example) - enabled")
+        );
+        assert_eq!(
+            text.lines()
+                .filter(|line| line.trim_start().starts_with("Input method "))
+                .count(),
+            1
+        );
+        assert!(!text.contains("IBus"), "{text}");
+
+        let cases = [
+            (
+                ExtensionStatus::Unavailable,
+                ComponentStatus::Unavailable,
+                "Example input method (example) is unavailable.",
+            ),
+            (
+                ExtensionStatus::Broken,
+                ComponentStatus::Blocked(Blocker::Incompatible),
+                "Example input method (example) is broken.",
+            ),
+            (
+                ExtensionStatus::Disabled,
+                ComponentStatus::Inactive,
+                "Example input method (example) is disabled.",
+            ),
+        ];
+        for (provider, component, problem) in cases {
+            let report = present_diagnostics(input(provider, component));
+            assert_eq!(report.onboarding(), OnboardingState::NoInputMethod);
+            let text = report.copy_text();
+            assert!(text.contains(problem), "{text}");
+            assert!(!text.contains("IBus"), "{text}");
+        }
+    }
+
+    #[test]
     fn an_xfce_session_reports_its_input_method_and_indicator_host() {
         use crate::platform::ComponentFact;
         let report = present_diagnostics(DiagnosticInput {
@@ -1335,6 +1474,7 @@ mod tests {
                 copy: ExtensionCopy::MynaConfigPackage,
                 error: None,
             }),
+            input_method: None,
             desktop: Vec::new(),
             performance: None,
             backends: vec![BackendDiagnostic {

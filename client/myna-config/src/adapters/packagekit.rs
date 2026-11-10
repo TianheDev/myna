@@ -557,4 +557,56 @@ mod tests {
             PackageManagerError::Failed { .. }
         ));
     }
+
+    #[test]
+    fn every_packagekit_status_has_a_user_facing_label() {
+        for (status, message) in [
+            (1, "Waiting for package manager lock"),
+            (2, "Preparing package sources"),
+            (3, "Changing packages"),
+            (4, "Removing packages"),
+            (5, "Refreshing package sources"),
+            (6, "Downloading files"),
+            (7, "Installing packages"),
+            (8, "Updating packages"),
+            (9, "Cleaning up"),
+            (10, "Removing obsolete packages"),
+            (11, "Resolving dependencies"),
+            (12, "Checking signatures"),
+            (13, "Testing package changes"),
+            (14, "Applying package changes"),
+            (18, "Downloading repository information"),
+            (19, "Downloading package lists"),
+            (20, "Downloading file lists"),
+            (21, "Downloading changelogs"),
+            (22, "Downloading package groups"),
+            (23, "Downloading update information"),
+            (24, "Repackaging files"),
+            (25, "Decompressing files"),
+            (26, "Loading package information"),
+        ] {
+            assert_eq!(status_text(status), gettextrs::gettext(message));
+        }
+        assert_eq!(
+            status_text(999),
+            gettextrs::gettext("Working with packages")
+        );
+    }
+
+    #[test]
+    fn transaction_errors_keep_the_users_next_action_clear() {
+        let error = |message| glib::Error::new(gio::IOErrorEnum::Failed, message);
+        assert_eq!(
+            transaction_call_error("Alpha", &error("request cancelled")),
+            PackageManagerError::Cancelled
+        );
+        assert!(matches!(
+            transaction_call_error("Alpha", &error("not authorized")),
+            PackageManagerError::Denied { .. }
+        ));
+        assert!(matches!(
+            transaction_call_error("Alpha", &error("daemon disappeared")),
+            PackageManagerError::Unavailable(_)
+        ));
+    }
 }
