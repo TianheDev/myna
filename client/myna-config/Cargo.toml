@@ -33,6 +33,7 @@ myna-platform = { path = "../myna-platform" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
+xml-rs = "0.8"
 # The HUD host's watch on the session's display, which dies with the session.
 x11rb = "0.13"
 

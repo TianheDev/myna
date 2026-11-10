@@ -659,14 +659,25 @@ impl BackendUi {
             ui.client_settings.as_ref(),
             persistence_writer,
         ) {
+            let extension_registry: Rc<dyn crate::extensions::ExtensionRegistry> =
+                Rc::new(crate::extensions::SystemExtensionRegistry::system());
+            let package_manager: Rc<dyn crate::extension_packages::ExtensionPackageManager> =
+                Rc::new(
+                    crate::adapters::packagekit::PackageKitExtensionManager::system(Arc::new(
+                        GioCommandRunner,
+                    )),
+                );
             *ui.extension_ui.borrow_mut() = Some(crate::extension_ui::ExtensionUi::new(
                 page.extension_group(),
                 overlay.clone(),
-                Rc::new(crate::extensions::SystemExtensionRegistry::system()),
-                Rc::clone(controller),
-                writer,
-                extension_configurator,
-                ui.operation_coordinator.clone(),
+                crate::extension_ui::ExtensionUiPorts {
+                    registry: extension_registry,
+                    package_manager,
+                    controller: Rc::clone(controller),
+                    writer,
+                    configurator: extension_configurator,
+                    operations: ui.operation_coordinator.clone(),
+                },
             ));
         }
 

@@ -1452,52 +1452,172 @@ msgstr ""
 msgid "other system copy"
 msgstr ""
 
-#: src/extension_ui.rs:160
-msgid ""
-"The selected input-method extension is no longer installed. Myna will use "
-"IBus."
+#: src/extension_ui.rs:201 src/extension_ui.rs:536
+msgid "Remove {package}"
 msgstr ""
 
-#: src/extension_ui.rs:168
+#: src/extension_ui.rs:231 src/extension_ui.rs:535
+msgid "Install {package}"
+msgstr ""
+
+#: src/extension_ui.rs:287
+msgid ""
+"The selected input-method extension no longer has a valid manifest. Myna "
+"will use IBus."
+msgstr ""
+
+#: src/extension_ui.rs:295
 msgid "The stale input-method extension selection could not be cleared."
 msgstr ""
 
-#: src/extension_ui.rs:216
+#: src/extension_ui.rs:343
 msgid "The input-method extension selection could not be saved."
 msgstr ""
 
-#: src/extension_ui.rs:270
+#: src/extension_ui.rs:380
+msgid "Installable input-method extensions could not be read: {detail}"
+msgstr ""
+
+#: src/extension_ui.rs:435
+msgid "The input-method extension package could not be changed: {detail}"
+msgstr ""
+
+#: src/extension_ui.rs:492
 msgid ""
 "Myna could not restart. The input-method selection will apply after Myna "
 "restarts: {detail}"
 msgstr ""
 
-#: src/extension_ui.rs:284
+#: src/extension_ui.rs:514
+msgid "Removing…"
+msgstr ""
+
+#: src/extension_ui.rs:523
+msgid "Removing {percent}%"
+msgstr ""
+
+#: src/extension_ui.rs:585
 msgid "Enabled"
 msgstr ""
 
-#: src/extension_ui.rs:285
+#: src/extension_ui.rs:586
 msgid "Disabled"
 msgstr ""
 
-#: src/extension_ui.rs:287
+#: src/extension_ui.rs:588
 msgid "The provider cannot be reached right now."
 msgstr ""
 
-#: src/extension_ui.rs:290
+#: src/extension_ui.rs:591
 msgid "This extension is broken and cannot be enabled."
 msgstr ""
 
-#: src/extension_ui.rs:299
+#: src/extension_ui.rs:600
 msgid "This input-method extension cannot be enabled."
 msgstr ""
 
-#: src/extension_ui.rs:303
+#: src/extension_ui.rs:604
 msgid "The input-method extension selection could not be saved: {detail}"
 msgstr ""
 
-#: src/extension_ui.rs:310
+#: src/extension_ui.rs:611
 msgid "Installed input-method extensions could not be read: {detail}"
+msgstr ""
+
+#: src/adapters/packagekit.rs:502
+msgid "Waiting for package manager lock"
+msgstr ""
+
+#: src/adapters/packagekit.rs:503
+msgid "Preparing package sources"
+msgstr ""
+
+#: src/adapters/packagekit.rs:504
+msgid "Changing packages"
+msgstr ""
+
+#: src/adapters/packagekit.rs:505
+msgid "Removing packages"
+msgstr ""
+
+#: src/adapters/packagekit.rs:506
+msgid "Refreshing package sources"
+msgstr ""
+
+#: src/adapters/packagekit.rs:507
+msgid "Downloading files"
+msgstr ""
+
+#: src/adapters/packagekit.rs:508
+msgid "Installing packages"
+msgstr ""
+
+#: src/adapters/packagekit.rs:509
+msgid "Updating packages"
+msgstr ""
+
+#: src/adapters/packagekit.rs:510
+msgid "Cleaning up"
+msgstr ""
+
+#: src/adapters/packagekit.rs:511
+msgid "Resolving dependencies"
+msgstr ""
+
+#: src/adapters/packagekit.rs:512
+msgid "Checking signatures"
+msgstr ""
+
+#: src/adapters/packagekit.rs:513
+msgid "Testing package changes"
+msgstr ""
+
+#: src/adapters/packagekit.rs:514
+msgid "Applying package changes"
+msgstr ""
+
+#: src/adapters/packagekit.rs:515
+msgid "Downloading repository information"
+msgstr ""
+
+#: src/adapters/packagekit.rs:516
+msgid "Downloading package lists"
+msgstr ""
+
+#: src/adapters/packagekit.rs:517
+msgid "Downloading file lists"
+msgstr ""
+
+#: src/adapters/packagekit.rs:518
+msgid "Downloading changelogs"
+msgstr ""
+
+#: src/adapters/packagekit.rs:519
+msgid "Downloading package groups"
+msgstr ""
+
+#: src/adapters/packagekit.rs:520
+msgid "Downloading update information"
+msgstr ""
+
+#: src/adapters/packagekit.rs:521
+msgid "Repackaging files"
+msgstr ""
+
+#: src/adapters/packagekit.rs:522
+msgid "Decompressing files"
+msgstr ""
+
+#: src/adapters/packagekit.rs:523
+msgid "Loading package information"
+msgstr ""
+
+#: src/adapters/packagekit.rs:524
+msgid "Removing obsolete packages"
+msgstr ""
+
+#: src/adapters/packagekit.rs:525
+msgid "Working with packages"
 msgstr ""
 
 #: src/myna_settings.rs:77

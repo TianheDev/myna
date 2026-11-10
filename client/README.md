@@ -73,10 +73,10 @@ myna-testbed --socket /tmp/myna.sock --language en --mic
 myna-testbed --list-devices
 ```
 
-### The dictation app - `myna-desktop` (hotkey → IBus injection)
+### The dictation app - `myna-desktop` (hotkey → text-input injection)
 
-The shipped push-to-talk app. Needs a GNOME (Wayland), Xfce (X11) or KDE Plasma 6 (Wayland) session and a
-running IBus daemon (on Plasma, IBus as KWin's input method). Activation must not depend on terminal focus (dictation injects into
+The shipped push-to-talk app. Needs a GNOME (Wayland), Xfce (X11) or KDE Plasma 6 (Wayland) session and either
+a running IBus daemon (on Plasma, IBus as KWin's input method) or an explicitly enabled input-method extension. Activation must not depend on terminal focus (dictation injects into
 *another* app), so the default is **toggle-to-talk via a desktop custom keyboard
 shortcut**: the app runs as a daemon on a control socket, and a shortcut
 bound to `myna-desktop --toggle` pokes it (tap = start, tap = stop). This works

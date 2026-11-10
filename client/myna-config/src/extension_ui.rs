@@ -2,51 +2,89 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc, Arc,
+};
+use std::time::Duration;
 
 use gtk::glib;
 use gtk4 as gtk;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 
+use crate::command::CancellationToken;
+use crate::extension_packages::{
+    ExtensionPackage, ExtensionPackageCoordinator, ExtensionPackageManager, PackageOperationError,
+    PackageOperationOutcome, PackageProgress, PackageProgressCallback,
+};
 use crate::extensions::{
-    ExtensionActionError, ExtensionChange, ExtensionChangeCause, ExtensionLifecycle,
-    ExtensionRegistry, ExtensionRestartOutcome, ExtensionSaveOutcome, ExtensionSnapshot,
-    ExtensionStatus,
+    active_id, ExtensionActionError, ExtensionChange, ExtensionChangeCause, ExtensionEntry,
+    ExtensionLifecycle, ExtensionRegistry, ExtensionRestartOutcome, ExtensionSaveOutcome,
+    ExtensionSnapshot, ExtensionStatus,
 };
 use crate::myna_settings::{MynaSettingsController, PersistenceWriter};
 use crate::operation_gate::OperationCoordinator;
 use crate::ports::SystemConfigurator;
+use crate::ui::{installing_text, InstallControl};
 
 pub struct ExtensionUi {
     group: adw::PreferencesGroup,
     overlay: adw::ToastOverlay,
     lifecycle: Rc<ExtensionLifecycle>,
+    packages: Rc<ExtensionPackageCoordinator>,
     writer: PersistenceWriter,
     configurator: Rc<dyn SystemConfigurator>,
     refreshing: Cell<bool>,
+    package_refreshing: Cell<bool>,
     last_refresh_error: RefCell<Option<String>>,
-    rows: RefCell<Vec<adw::SwitchRow>>,
+    last_package_error: RefCell<Option<String>>,
+    snapshot: RefCell<Option<ExtensionSnapshot>>,
+    offers: RefCell<Vec<ExtensionPackage>>,
+    rows: RefCell<Vec<gtk::Widget>>,
+}
+
+pub struct ExtensionUiPorts {
+    pub registry: Rc<dyn ExtensionRegistry>,
+    pub package_manager: Rc<dyn ExtensionPackageManager>,
+    pub controller: Rc<MynaSettingsController>,
+    pub writer: PersistenceWriter,
+    pub configurator: Rc<dyn SystemConfigurator>,
+    pub operations: OperationCoordinator,
 }
 
 impl ExtensionUi {
     pub fn new(
         group: adw::PreferencesGroup,
         overlay: adw::ToastOverlay,
-        registry: Rc<dyn ExtensionRegistry>,
-        controller: Rc<MynaSettingsController>,
-        writer: PersistenceWriter,
-        configurator: Rc<dyn SystemConfigurator>,
-        operations: OperationCoordinator,
+        ports: ExtensionUiPorts,
     ) -> Rc<Self> {
-        let lifecycle = ExtensionLifecycle::new(registry, controller, operations);
+        let lifecycle = ExtensionLifecycle::new(
+            Rc::clone(&ports.registry),
+            Rc::clone(&ports.controller),
+            ports.operations.clone(),
+        );
+        let packages = ExtensionPackageCoordinator::new(
+            ports.package_manager,
+            ports.registry,
+            ports.controller,
+            ports.writer.clone(),
+            Rc::clone(&ports.configurator),
+            ports.operations,
+        );
         let ui = Rc::new(Self {
             group,
             overlay,
             lifecycle,
-            writer,
-            configurator,
+            packages,
+            writer: ports.writer,
+            configurator: ports.configurator,
             refreshing: Cell::new(false),
+            package_refreshing: Cell::new(false),
             last_refresh_error: RefCell::new(None),
+            last_package_error: RefCell::new(None),
+            snapshot: RefCell::new(None),
+            offers: RefCell::new(Vec::new()),
             rows: RefCell::new(Vec::new()),
         });
         ui.refresh();
@@ -54,12 +92,10 @@ impl ExtensionUi {
     }
 
     pub fn refresh(self: &Rc<Self>) {
-        if self.lifecycle.busy() || self.refreshing.replace(true) {
+        if self.lifecycle.busy() || self.packages.busy() || self.refreshing.replace(true) {
             return;
         }
-        for row in self.rows.borrow_mut().drain(..) {
-            self.group.remove(&row);
-        }
+        self.clear_rows();
 
         let snapshot = match self.lifecycle.snapshot() {
             Ok(snapshot) => {
@@ -81,21 +117,53 @@ impl ExtensionUi {
                 return;
             }
         };
+        self.snapshot.replace(Some(snapshot.clone()));
         if snapshot.stale_active.is_some() {
             self.clear_stale();
         }
-        self.render(&snapshot);
+        self.render();
         self.refreshing.set(false);
+        self.refresh_packages();
     }
 
-    fn render(self: &Rc<Self>, snapshot: &ExtensionSnapshot) {
-        self.group.set_visible(!snapshot.entries.is_empty());
-        for entry in &snapshot.entries {
+    fn render(self: &Rc<Self>) {
+        self.clear_rows();
+        let Some(snapshot) = self.snapshot.borrow().clone() else {
+            self.group.set_visible(false);
+            return;
+        };
+        let packages = self.offers.borrow().clone();
+        let mut entries = snapshot.entries;
+        let active = active_id(&self.lifecycle.controller());
+        for package in packages.iter().filter(|package| package.installed) {
+            if package.provider_ids.is_empty() {
+                entries.push(ExtensionEntry {
+                    id: package.package_name.clone(),
+                    name: package.name.clone(),
+                    status: ExtensionStatus::Broken,
+                    selected: false,
+                });
+            }
+            for id in &package.provider_ids {
+                if entries.iter().any(|entry| entry.id == *id) {
+                    continue;
+                }
+                entries.push(ExtensionEntry {
+                    id: id.clone(),
+                    name: package.name.clone(),
+                    status: ExtensionStatus::Broken,
+                    selected: active.as_deref() == Some(id),
+                });
+            }
+        }
+
+        for entry in &entries {
+            let package = package_for_provider(&packages, &entry.id);
             let row = adw::SwitchRow::builder()
                 .title(&entry.name)
                 .subtitle(status_text(entry.status))
                 .active(entry.selected)
-                .sensitive(entry.can_toggle())
+                .sensitive(entry.can_toggle() || package.is_some())
                 .build();
             row.update_property(&[gtk::accessible::Property::Description(&status_text(
                 entry.status,
@@ -126,8 +194,67 @@ impl ExtensionUi {
                     }
                 }
             });
+            if let Some(package) = package {
+                let control = InstallControl::new();
+                control.show_offer(
+                    &gettextrs::gettext("Remove"),
+                    &gettextrs::gettext("Remove {package}").replace("{package}", &package.name),
+                );
+                control.button().connect_clicked({
+                    let ui = Rc::downgrade(self);
+                    let package = package.clone();
+                    let control = control.clone();
+                    move |_| {
+                        if let Some(ui) = ui.upgrade() {
+                            ui.run_package_operation(
+                                package.clone(),
+                                PackageUiAction::Remove,
+                                control.clone(),
+                            );
+                        }
+                    }
+                });
+                row.add_suffix(&control);
+            }
             self.group.add(&row);
-            self.rows.borrow_mut().push(row);
+            self.rows.borrow_mut().push(row.upcast());
+        }
+
+        for package in packages.iter().filter(|package| !package.installed) {
+            let row = adw::ActionRow::builder()
+                .title(&package.name)
+                .subtitle(&package.summary)
+                .build();
+            let control = InstallControl::new();
+            control.show_offer(
+                &gettextrs::gettext("Install"),
+                &gettextrs::gettext("Install {package}").replace("{package}", &package.name),
+            );
+            control.button().connect_clicked({
+                let ui = Rc::downgrade(self);
+                let package = package.clone();
+                let control = control.clone();
+                move |_| {
+                    if let Some(ui) = ui.upgrade() {
+                        ui.run_package_operation(
+                            package.clone(),
+                            PackageUiAction::Install,
+                            control.clone(),
+                        );
+                    }
+                }
+            });
+            row.add_suffix(&control);
+            self.group.add(&row);
+            self.rows.borrow_mut().push(row.upcast());
+        }
+
+        self.group.set_visible(!self.rows.borrow().is_empty());
+    }
+
+    fn clear_rows(&self) {
+        for row in self.rows.borrow_mut().drain(..) {
+            self.group.remove(&row);
         }
     }
 
@@ -157,7 +284,7 @@ impl ExtensionUi {
                     ExtensionSaveOutcome::Restart(change) => {
                         if let Some(ui) = ui.upgrade() {
                             ui.toast(&gettextrs::gettext(
-                                "The selected input-method extension is no longer installed. Myna will use IBus.",
+                                "The selected input-method extension no longer has a valid manifest. Myna will use IBus.",
                             ));
                         }
                         restart_change(Rc::clone(&lifecycle), configurator, change, ui);
@@ -228,6 +355,94 @@ impl ExtensionUi {
         );
     }
 
+    fn refresh_packages(self: &Rc<Self>) {
+        if self.package_refreshing.get() || self.packages.busy() {
+            return;
+        }
+        self.package_refreshing.set(true);
+        let ui = Rc::downgrade(self);
+        let packages = Rc::clone(&self.packages);
+        glib::spawn_future_local(async move {
+            let result = packages.discover(CancellationToken::new()).await;
+            let Some(ui) = ui.upgrade() else {
+                return;
+            };
+            ui.package_refreshing.set(false);
+            match result {
+                Ok(offers) => {
+                    ui.last_package_error.borrow_mut().take();
+                    ui.offers.replace(offers);
+                    if !ui.lifecycle.busy() && !ui.packages.busy() {
+                        ui.render();
+                    }
+                }
+                Err(error) => {
+                    let message = gettextrs::gettext(
+                        "Installable input-method extensions could not be read: {detail}",
+                    )
+                    .replace("{detail}", &error.to_string());
+                    ui.report_package_error(&message);
+                }
+            }
+        });
+    }
+
+    fn run_package_operation(
+        self: &Rc<Self>,
+        package: ExtensionPackage,
+        action: PackageUiAction,
+        control: InstallControl,
+    ) {
+        if self.packages.busy() {
+            return;
+        }
+        control.show_busy(&action.starting_text());
+        let (progress, done) = package_progress(control.clone(), action);
+        let coordinator = Rc::clone(&self.packages);
+        let ui = Rc::downgrade(self);
+        let package_name = package.name.clone();
+        glib::spawn_future_local(async move {
+            let result = match action {
+                PackageUiAction::Install => {
+                    coordinator
+                        .install(&package, CancellationToken::new(), progress)
+                        .await
+                }
+                PackageUiAction::Remove => {
+                    coordinator
+                        .remove(&package, CancellationToken::new(), progress)
+                        .await
+                }
+            };
+            done.store(true, Ordering::Release);
+            let Some(ui) = ui.upgrade() else {
+                return;
+            };
+            match result {
+                Ok(PackageOperationOutcome::Installed) => {
+                    control.show_installed();
+                }
+                Ok(
+                    PackageOperationOutcome::Removed
+                    | PackageOperationOutcome::RemovedWithoutActiveProvider,
+                ) => {}
+                Err(PackageOperationError::Busy) => {
+                    action.restore(&control, &package_name);
+                }
+                Err(error) => {
+                    action.restore(&control, &package_name);
+                    ui.toast(
+                        &gettextrs::gettext(
+                            "The input-method extension package could not be changed: {detail}",
+                        )
+                        .replace("{detail}", &error.to_string()),
+                    );
+                }
+            }
+            ui.schedule_refresh();
+        });
+    }
+
     fn schedule_refresh(self: &Rc<Self>) {
         let ui = Rc::downgrade(self);
         glib::idle_add_local_once(move || {
@@ -243,6 +458,14 @@ impl ExtensionUi {
 
     fn report_refresh_error(&self, message: &str) {
         let mut last = self.last_refresh_error.borrow_mut();
+        if last.as_deref() != Some(message) {
+            self.toast(message);
+            *last = Some(message.to_owned());
+        }
+    }
+
+    fn report_package_error(&self, message: &str) {
+        let mut last = self.last_package_error.borrow_mut();
         if last.as_deref() != Some(message) {
             self.toast(message);
             *last = Some(message.to_owned());
@@ -277,6 +500,85 @@ fn restart_change(
             ui.schedule_refresh();
         }
     });
+}
+
+#[derive(Clone, Copy)]
+enum PackageUiAction {
+    Install,
+    Remove,
+}
+
+impl PackageUiAction {
+    fn starting_text(self) -> String {
+        match self {
+            Self::Install => gettextrs::gettext("Installing…"),
+            Self::Remove => gettextrs::gettext("Removing…"),
+        }
+    }
+
+    fn progress_text(self, progress: &PackageProgress) -> String {
+        match progress {
+            PackageProgress::Status(status) => status.clone(),
+            PackageProgress::Percent(percent) => match self {
+                Self::Install => installing_text(Some(*percent)),
+                Self::Remove => gettextrs::gettext("Removing {percent}%")
+                    .replace("{percent}", &percent.to_string()),
+            },
+        }
+    }
+
+    fn restore(self, control: &InstallControl, package: &str) {
+        let label = match self {
+            Self::Install => gettextrs::gettext("Install"),
+            Self::Remove => gettextrs::gettext("Remove"),
+        };
+        let accessible = match self {
+            Self::Install => gettextrs::gettext("Install {package}"),
+            Self::Remove => gettextrs::gettext("Remove {package}"),
+        }
+        .replace("{package}", package);
+        control.show_offer(&label, &accessible);
+    }
+}
+
+fn package_progress(
+    control: InstallControl,
+    action: PackageUiAction,
+) -> (PackageProgressCallback, Arc<AtomicBool>) {
+    let (sender, receiver) = mpsc::channel();
+    let done = Arc::new(AtomicBool::new(false));
+    let finished = Arc::clone(&done);
+    glib::timeout_add_local(Duration::from_millis(100), move || {
+        while let Ok(progress) = receiver.try_recv() {
+            control.show_busy(&action.progress_text(&progress));
+        }
+        if finished.load(Ordering::Acquire) {
+            while let Ok(progress) = receiver.try_recv() {
+                control.show_busy(&action.progress_text(&progress));
+            }
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
+    let callback: PackageProgressCallback = Arc::new(move |progress| {
+        let _ = sender.send(progress);
+    });
+    (callback, done)
+}
+
+fn package_for_provider<'a>(
+    packages: &'a [ExtensionPackage],
+    provider_id: &str,
+) -> Option<&'a ExtensionPackage> {
+    packages.iter().find(|package| {
+        package.installed
+            && (package
+                .provider_ids
+                .iter()
+                .any(|candidate| candidate == provider_id)
+                || (package.provider_ids.is_empty() && package.package_name == provider_id))
+    })
 }
 
 fn status_text(status: ExtensionStatus) -> String {
