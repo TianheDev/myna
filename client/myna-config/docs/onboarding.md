@@ -107,7 +107,7 @@ components, listed after the model: the input method and the HUD host's
 autostart entry.
 The step has no row per component: one is named in the line under the button
 only when it blocks.
-The input method is IBus: installed, set for the session
+The input method is IBus when no provider is active: installed, set for the session
 (`GTK_IM_MODULE=ibus`, `XMODIFIERS=@im=ibus`) and its daemon running is
 satisfied; installed but not chosen is the wizard's to fix with `im-config`
 for the user, which takes effect at the next login, so the shortcut step
@@ -127,6 +127,15 @@ holds it (issue #79). On Plasma the input method is IBus as KWin's: kwinrc's
 named is fixed at once with `ibus start --type kde-wayland`, so no re-login;
 fcitx5 or plasma-keyboard named (or fcitx5 running) blocks the step with a
 line saying to choose IBus, and is never switched.
+
+With an explicitly selected provider, `InputMethodComponents`
+(`extensions.rs`) replaces that IBus slot before the wizard reads the desktop.
+A live provider socket is satisfied. A missing socket is unavailable, and a
+broken manifest blocks the component step; neither case falls back to IBus or
+offers to configure it. Diagnostics names the active text-input backend and
+reports the provider's enabled, unavailable, disabled, or broken state, while
+the line under the wizard button sends the user to Myna Settings. With no
+active provider the wrapper delegates every component call unchanged.
 
 The settings window's main menu reopens the wizard (Set Up Dictation), modal
 over the window. It refuses while a backend operation is in flight: the wizard

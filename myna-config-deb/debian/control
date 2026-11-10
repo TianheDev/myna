@@ -24,7 +24,9 @@ Package: myna-config
 Architecture: amd64 arm64
 Depends: ${misc:Depends},
          ${shlibs:Depends},
+         appstream,
          libglib2.0-bin,
+         packagekit,
          pkexec,
          snapd,
 Recommends: ibus,

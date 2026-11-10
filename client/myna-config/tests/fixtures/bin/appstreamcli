@@ -1,0 +1,6 @@
+#!/bin/sh
+# The fixture machine has no AppStream catalog. Keep passive discovery quiet.
+case "$*" in
+    *" search "*|*" dump "*) exit 0 ;;
+    *) exit 1 ;;
+esac

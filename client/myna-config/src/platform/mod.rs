@@ -140,6 +140,12 @@ impl Platform {
     /// account of the extension where there is one, else each required
     /// component's status.
     pub fn diagnostics(&self) -> DesktopDiagnostics {
+        self.diagnostics_with(self.components.clone())
+    }
+
+    /// The same report when the caller has composed the session's components
+    /// with an active input-method provider.
+    pub fn diagnostics_with(&self, components: Rc<dyn Components>) -> DesktopDiagnostics {
         if self.profile == Profile::Gnome {
             return DesktopDiagnostics {
                 shell: gnome::components::shell_version(),
@@ -149,20 +155,19 @@ impl Platform {
                 components: Vec::new(),
             };
         }
-        let components = self
-            .components
+        let facts = components
             .required()
             .into_iter()
             .map(|component| ComponentFact {
                 purpose: component.purpose,
-                status: immediately(self.components.status(&component.id))
+                status: immediately(components.status(&component.id))
                     .unwrap_or(ComponentStatus::Unavailable),
             })
             .collect();
         DesktopDiagnostics {
             shell: None,
             extension: None,
-            components,
+            components: facts,
         }
     }
 }

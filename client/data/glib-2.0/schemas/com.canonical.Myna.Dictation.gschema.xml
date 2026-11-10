@@ -80,7 +80,7 @@
       <summary>Active input-method extension</summary>
       <description>
         The explicitly selected provider id for an installed IM extension.
-        Empty keeps Myna on its built-in IBus backend.
+        Empty keeps Myna using its built-in IBus input method.
       </description>
     </key>
 

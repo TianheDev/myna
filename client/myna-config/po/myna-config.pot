@@ -147,6 +147,10 @@ msgstr ""
 msgid "Dictation"
 msgstr ""
 
+#: data/myna-page.blp:122 src/diagnostics.rs:817
+msgid "Input method"
+msgstr ""
+
 #: data/onboarding-components.blp:18 src/app.rs:4055 src/onboarding_ui.rs:1427
 msgid "Install components"
 msgstr ""
@@ -922,6 +926,18 @@ msgstr ""
 msgid "Close Myna Settings."
 msgstr ""
 
+#: src/onboarding_ui.rs:958
+msgid ""
+"The selected input-method extension is broken. Reinstall or update it in "
+"Myna Settings."
+msgstr ""
+
+#: src/onboarding_ui.rs:962
+msgid ""
+"The selected input-method extension is unavailable. Start its input-method "
+"framework, or manage the extension in Myna Settings."
+msgstr ""
+
 #: src/onboarding_ui.rs:945 src/diagnostics.rs:658
 msgid ""
 "Another input method is in use, and Dictation types through IBus. Choose "
@@ -1156,6 +1172,50 @@ msgstr ""
 msgid "of the last 10 s stalled"
 msgstr ""
 
+#: src/diagnostics.rs:421
+msgid ""
+"{provider} is unavailable. Start its input method framework and make sure "
+"the extension is installed."
+msgstr ""
+
+#: src/diagnostics.rs:427
+msgid ""
+"{provider} is disabled. Enable it in Myna Settings or choose another "
+"provider."
+msgstr ""
+
+#: src/diagnostics.rs:433
+msgid ""
+"{provider} is broken. Reinstall or update the extension in Myna Settings."
+msgstr ""
+
+#: src/diagnostics.rs:441
+msgid ""
+"IBus is not installed, so Myna cannot type. Install the “ibus” package, then "
+"log out and back in."
+msgstr ""
+
+#: src/diagnostics.rs:446
+msgid ""
+"IBus is not set up, so Myna cannot type. Set up Dictation to turn it on."
+msgstr ""
+
+#: src/diagnostics.rs:460
+msgid "enabled"
+msgstr ""
+
+#: src/diagnostics.rs:462
+msgid "unavailable: provider socket is not available"
+msgstr ""
+
+#: src/diagnostics.rs:464
+msgid "disabled"
+msgstr ""
+
+#: src/diagnostics.rs:466
+msgid "broken: manifest is invalid or provider is missing"
+msgstr ""
+
 #: src/diagnostics.rs:408
 msgid "No model connected"
 msgstr ""
@@ -1313,17 +1373,6 @@ msgstr ""
 msgid "Problems"
 msgstr ""
 
-#: src/diagnostics.rs:655
-msgid ""
-"IBus is not installed, so Myna cannot type. Install the “ibus” package, then "
-"log out and back in."
-msgstr ""
-
-#: src/diagnostics.rs:660
-msgid ""
-"IBus is not set up, so Myna cannot type. Set up Dictation to turn it on."
-msgstr ""
-
 #: src/diagnostics.rs:671 src/diagnostics.rs:685
 msgid "(none)"
 msgstr ""
@@ -1374,10 +1423,6 @@ msgstr ""
 
 #: src/diagnostics.rs:810
 msgid "floor"
-msgstr ""
-
-#: src/diagnostics.rs:817
-msgid "Input method"
 msgstr ""
 
 #: src/diagnostics.rs:818
@@ -1450,6 +1495,179 @@ msgstr ""
 
 #: src/diagnostics.rs:862
 msgid "other system copy"
+msgstr ""
+
+#: src/extension_ui.rs:201 src/extension_ui.rs:536
+msgid "Remove {package}"
+msgstr ""
+
+#: src/extension_ui.rs:231 src/extension_ui.rs:535
+msgid "Install {package}"
+msgstr ""
+
+#: src/extension_ui.rs:287
+msgid ""
+"The selected input-method extension no longer has a valid manifest. Myna "
+"will use IBus."
+msgstr ""
+
+#: src/extension_ui.rs:295
+msgid "The stale input-method extension selection could not be cleared."
+msgstr ""
+
+#: src/extension_ui.rs:343
+msgid "The input-method extension selection could not be saved."
+msgstr ""
+
+#: src/extension_ui.rs:380
+msgid "Installable input-method extensions could not be read: {detail}"
+msgstr ""
+
+#: src/extension_ui.rs:435
+msgid "The input-method extension package could not be changed: {detail}"
+msgstr ""
+
+#: src/extension_ui.rs:492
+msgid ""
+"Myna could not restart. The input-method selection will apply after Myna "
+"restarts: {detail}"
+msgstr ""
+
+#: src/extension_ui.rs:514
+msgid "Removing…"
+msgstr ""
+
+#: src/extension_ui.rs:523
+msgid "Removing {percent}%"
+msgstr ""
+
+#: src/extension_ui.rs:585
+msgid "Enabled"
+msgstr ""
+
+#: src/extension_ui.rs:586
+msgid "Disabled"
+msgstr ""
+
+#: src/extension_ui.rs:588
+msgid "The provider cannot be reached right now."
+msgstr ""
+
+#: src/extension_ui.rs:591
+msgid "This extension is broken and cannot be enabled."
+msgstr ""
+
+#: src/extension_ui.rs:600
+msgid "This input-method extension cannot be enabled."
+msgstr ""
+
+#: src/extension_ui.rs:604
+msgid "The input-method extension selection could not be saved: {detail}"
+msgstr ""
+
+#: src/extension_ui.rs:611
+msgid "Installed input-method extensions could not be read: {detail}"
+msgstr ""
+
+#. TRANSLATORS: {percent} is how much of the download has arrived, a number from 0 to 100.
+#: src/ui/install_control.rs:131
+msgid "Installing {percent}%"
+msgstr ""
+
+#: src/adapters/packagekit.rs:502
+msgid "Waiting for package manager lock"
+msgstr ""
+
+#: src/adapters/packagekit.rs:503
+msgid "Preparing package sources"
+msgstr ""
+
+#: src/adapters/packagekit.rs:504
+msgid "Changing packages"
+msgstr ""
+
+#: src/adapters/packagekit.rs:505
+msgid "Removing packages"
+msgstr ""
+
+#: src/adapters/packagekit.rs:506
+msgid "Refreshing package sources"
+msgstr ""
+
+#: src/adapters/packagekit.rs:507
+msgid "Downloading files"
+msgstr ""
+
+#: src/adapters/packagekit.rs:508
+msgid "Installing packages"
+msgstr ""
+
+#: src/adapters/packagekit.rs:509
+msgid "Updating packages"
+msgstr ""
+
+#: src/adapters/packagekit.rs:510
+msgid "Cleaning up"
+msgstr ""
+
+#: src/adapters/packagekit.rs:511
+msgid "Resolving dependencies"
+msgstr ""
+
+#: src/adapters/packagekit.rs:512
+msgid "Checking signatures"
+msgstr ""
+
+#: src/adapters/packagekit.rs:513
+msgid "Testing package changes"
+msgstr ""
+
+#: src/adapters/packagekit.rs:514
+msgid "Applying package changes"
+msgstr ""
+
+#: src/adapters/packagekit.rs:515
+msgid "Downloading repository information"
+msgstr ""
+
+#: src/adapters/packagekit.rs:516
+msgid "Downloading package lists"
+msgstr ""
+
+#: src/adapters/packagekit.rs:517
+msgid "Downloading file lists"
+msgstr ""
+
+#: src/adapters/packagekit.rs:518
+msgid "Downloading changelogs"
+msgstr ""
+
+#: src/adapters/packagekit.rs:519
+msgid "Downloading package groups"
+msgstr ""
+
+#: src/adapters/packagekit.rs:520
+msgid "Downloading update information"
+msgstr ""
+
+#: src/adapters/packagekit.rs:521
+msgid "Repackaging files"
+msgstr ""
+
+#: src/adapters/packagekit.rs:522
+msgid "Decompressing files"
+msgstr ""
+
+#: src/adapters/packagekit.rs:523
+msgid "Loading package information"
+msgstr ""
+
+#: src/adapters/packagekit.rs:524
+msgid "Removing obsolete packages"
+msgstr ""
+
+#: src/adapters/packagekit.rs:525
+msgid "Working with packages"
 msgstr ""
 
 #: src/myna_settings.rs:77
@@ -1691,11 +1909,6 @@ msgstr ""
 msgid "This model provides no description for this setting."
 msgstr ""
 
-#. TRANSLATORS: {percent} is how much of the download has arrived, a number from 0 to 100.
-#: src/ui/install_control.rs:131
-msgid "Installing {percent}%"
-msgstr ""
-
 #: ../data/glib-2.0/schemas/com.canonical.Myna.Dictation.gschema.xml:41
 msgid "Sounds on start, stop and error"
 msgstr ""
@@ -1739,10 +1952,20 @@ msgid ""
 msgstr ""
 
 #: ../data/glib-2.0/schemas/com.canonical.Myna.Dictation.gschema.xml:80
-msgid "Indicator style"
+msgid "Active input-method extension"
 msgstr ""
 
 #: ../data/glib-2.0/schemas/com.canonical.Myna.Dictation.gschema.xml:81
+msgid ""
+"The explicitly selected provider id for an installed IM extension. Empty "
+"keeps Myna using its built-in IBus input method."
+msgstr ""
+
+#: ../data/glib-2.0/schemas/com.canonical.Myna.Dictation.gschema.xml:89
+msgid "Indicator style"
+msgstr ""
+
+#: ../data/glib-2.0/schemas/com.canonical.Myna.Dictation.gschema.xml:90
 msgid ""
 "All three render the same calibrated audio envelope: Default is a level bar "
 "in the accent colour, Ribbon a flowing GPU wave, VU meter a segmented meter."

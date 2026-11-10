@@ -1276,6 +1276,7 @@ dependencies = [
  "sha2",
  "thiserror",
  "x11rb",
+ "xml-rs",
 ]
 
 [[package]]

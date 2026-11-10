@@ -98,6 +98,10 @@ impl InstallControl {
         self.show(None, Some(&installing_text(percent)), false);
     }
 
+    pub fn show_busy(&self, text: &str) {
+        self.show(None, Some(text), false);
+    }
+
     pub fn show_installed(&self) {
         self.show(None, None, true);
     }

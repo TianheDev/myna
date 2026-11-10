@@ -413,6 +413,7 @@ pub struct BackendUi {
     /// General's settings, told what the active backend does by default so
     /// "When to transcribe" can show it.
     client_settings: Option<Rc<crate::myna_settings::MynaSettingsController>>,
+    extension_ui: RefCell<Option<Rc<crate::extension_ui::ExtensionUi>>>,
     /// The General tab's model rows and the backend each one chooses.
     model_rows: RefCell<Vec<ModelRow>>,
     /// Never shown. GTK draws a check button as a radio only while it is in a
@@ -549,6 +550,7 @@ impl FollowsModel {
 pub struct GeneralSettings {
     pub spoken_language: adw::PreferencesGroup,
     pub controller: Rc<crate::myna_settings::MynaSettingsController>,
+    pub writer: crate::myna_settings::PersistenceWriter,
 }
 
 impl BackendUi {
@@ -597,16 +599,16 @@ impl BackendUi {
         diagnostics_page: adw::NavigationPage,
     ) -> Rc<Self> {
         let controller = BackendController::new(repository);
-        let (follows_model, client_settings) = general_settings
-            .map(|settings| {
-                (
-                    vec![FollowsModel::spoken_language(settings.spoken_language)],
-                    settings.controller,
-                )
-            })
-            .unzip();
-        let follows_model = follows_model.unwrap_or_default();
+        let (follows_model, client_settings, persistence_writer) = match general_settings {
+            Some(settings) => (
+                vec![FollowsModel::spoken_language(settings.spoken_language)],
+                Some(settings.controller),
+                Some(settings.writer),
+            ),
+            None => (Vec::new(), None, None),
+        };
         let myna_selector = myna_page.downcast::<ui::MynaPage>().ok();
+        let extension_configurator = Rc::clone(&configurator);
         let operation_coordinator = OperationCoordinator::new();
         diagnostics_nav.replace(std::slice::from_ref(&diagnostics_page));
         let ui = Rc::new_cyclic(|this| BackendUi {
@@ -624,6 +626,7 @@ impl BackendUi {
             myna_selector,
             follows_model,
             client_settings,
+            extension_ui: RefCell::new(None),
             active_backend: ActiveBackendController::with_coordinator(
                 crate::domain::ConnectionSnapshot::new(
                     Vec::new(),
@@ -651,6 +654,32 @@ impl BackendUi {
             follow_interval: std::cell::Cell::new(FOLLOW_INTERVAL),
             nvidia_gpu: crate::machine::has_nvidia_gpu(),
         });
+        if let (Some(page), Some(controller), Some(writer)) = (
+            ui.myna_selector.as_ref(),
+            ui.client_settings.as_ref(),
+            persistence_writer,
+        ) {
+            let extension_registry: Rc<dyn crate::extensions::ExtensionRegistry> =
+                Rc::new(crate::extensions::SystemExtensionRegistry::system());
+            let package_manager: Rc<dyn crate::extension_packages::ExtensionPackageManager> =
+                Rc::new(
+                    crate::adapters::packagekit::PackageKitExtensionManager::system(Arc::new(
+                        GioCommandRunner,
+                    )),
+                );
+            *ui.extension_ui.borrow_mut() = Some(crate::extension_ui::ExtensionUi::new(
+                page.extension_group(),
+                overlay.clone(),
+                crate::extension_ui::ExtensionUiPorts {
+                    registry: extension_registry,
+                    package_manager,
+                    controller: Rc::clone(controller),
+                    writer,
+                    configurator: extension_configurator,
+                    operations: ui.operation_coordinator.clone(),
+                },
+            ));
+        }
 
         ui.connect_view_stack_selection();
         ui.connect_install_button();
@@ -1475,7 +1504,9 @@ impl BackendUi {
         let gate = gate.clone();
         let window = window.clone();
         glib::spawn_future_local(async move {
-            let desktop = crate::platform::Platform::current().components();
+            let desktop = crate::extensions::provider_aware_components(
+                crate::platform::Platform::current().components(),
+            );
             let components = crate::onboarding_ui::assess_machine(
                 repository.as_ref(),
                 configurator.as_ref(),
@@ -1516,6 +1547,11 @@ impl BackendUi {
     /// refuses while it loads or applies, diagnostics debounce.
     fn refresh_visible_tab(self: &Rc<Self>) {
         match self.view_stack.visible_child_name().as_deref() {
+            Some("general") => {
+                if let Some(extension) = self.extension_ui.borrow().as_ref() {
+                    extension.refresh();
+                }
+            }
             Some("diagnostics") => self.on_diagnostics_requested(),
             Some("model") => {
                 if let Some(page) = self.backend_nav.visible_page() {
@@ -2126,6 +2162,11 @@ impl BackendUi {
         let pages = self.controller.pages();
         let discovery_error = self.controller.last_discovery_error();
         let snaps = self.installed_snaps.borrow().clone();
+        let input_method = self
+            .extension_ui
+            .borrow()
+            .as_ref()
+            .and_then(|extensions| extensions.active_provider());
         let host = self.host.borrow().clone();
         let (system, machine, daemon, daemon_report, desktop) = match host {
             Some(host) => (
@@ -2151,6 +2192,7 @@ impl BackendUi {
             daemon,
             daemon_report,
             extension: desktop.extension,
+            input_method,
             desktop: desktop.components,
             performance: self.performance.borrow().clone(),
             backends: pages
@@ -3499,7 +3541,10 @@ struct HostFacts {
 
 /// Blocks on /proc and on the session bus: only for the blocking pool.
 fn host_facts() -> HostFacts {
-    let desktop = crate::platform::Platform::current().diagnostics();
+    let components = crate::extensions::provider_aware_components(
+        crate::platform::Platform::current().components(),
+    );
+    let desktop = crate::platform::Platform::current().diagnostics_with(components);
     HostFacts {
         system: crate::machine::system_facts(desktop.shell.clone(), Vec::new()),
         machine: crate::machine::machine_facts(),
@@ -3619,6 +3664,7 @@ mod tests {
             myna_selector,
             follows_model,
             client_settings: None,
+            extension_ui: RefCell::new(None),
             active_backend: ActiveBackendController::with_coordinator(
                 crate::domain::ConnectionSnapshot::new(
                     Vec::new(),

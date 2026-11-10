@@ -13,7 +13,8 @@ use crate::adapters::client_settings::GioClientSettings;
 use crate::domain::ClientSettingValue;
 use crate::myna_settings::{
     choice_display_label, widget_plan, DebouncedTextCommit, MynaSettingsController, PageState,
-    PersistenceRequest, PersistenceWriter, Placement, SettingRow, SettingsEvent, WidgetKind,
+    PersistenceCompletion, PersistenceRequest, PersistenceWriter, Placement, SettingRow,
+    SettingsEvent, WidgetKind,
 };
 use crate::onboarding::needs_onboarding;
 use crate::ports::{ClientSettings, ClientSettingsError};
@@ -1305,6 +1306,7 @@ fn template_probe() -> glib::ExitCode {
         myna.shortcut_row(),
         myna.shortcut_keys(),
         myna.shortcut_button(),
+        myna.extension_group(),
     );
     println!("MynaPage");
     let backend = ui::BackendPage::new();
@@ -1418,10 +1420,15 @@ fn build_window(application: &adw::Application) {
                 std::sync::Arc::new(crate::adapters::snapd_client::UnixSocketSnapdClient::new()),
             ),
             &crate::adapters::system_configurator::PkexecSystemConfigurator::new(runner),
-            crate::platform::Platform::current().components().as_ref(),
+            crate::extensions::provider_aware_components(
+                crate::platform::Platform::current().components(),
+            )
+            .as_ref(),
         )
         .await;
-        if needs_onboarding(&components) {
+        if crate::onboarding::provider_needs_settings(&components) {
+            build_settings_window(&application);
+        } else if needs_onboarding(&components) {
             crate::onboarding_ui::OnboardingUi::present(&application, components);
         } else {
             build_settings_window(&application);
@@ -1479,11 +1486,16 @@ fn build_settings_window(application: &adw::Application) {
                     let controller =
                         MynaSettingsController::load(Rc::new(settings) as Rc<dyn ClientSettings>);
                     let spoken_language = crate::backend_ui::spoken_language_group();
-                    let page =
-                        build_myna_page(controller.clone(), writer, &overlay, &spoken_language);
+                    let page = build_myna_page(
+                        controller.clone(),
+                        writer.clone(),
+                        &overlay,
+                        &spoken_language,
+                    );
                     let general = crate::backend_ui::GeneralSettings {
                         spoken_language,
                         controller,
+                        writer,
                     };
                     (page, Some(general))
                 }
@@ -3203,9 +3215,10 @@ fn backends_probe() -> glib::ExitCode {
             return glib::ExitCode::FAILURE;
         }
     };
+    let writer = PersistenceWriter::spawn(GioClientSettings::open);
     let myna_page = build_myna_page(
         client_settings.clone(),
-        PersistenceWriter::spawn(GioClientSettings::open),
+        writer.clone(),
         &overlay,
         &spoken_language,
     );
@@ -3228,6 +3241,7 @@ fn backends_probe() -> glib::ExitCode {
         Some(crate::backend_ui::GeneralSettings {
             spoken_language,
             controller: client_settings,
+            writer,
         }),
         status_page("About and Diagnostics", "", "dialog-information-symbolic"),
     );
@@ -5838,6 +5852,9 @@ fn ready_page(
     let bindings = Rc::new(RefCell::new(BTreeMap::<String, RowBinding>::new()));
 
     for setting in rows {
+        if setting.metadata().key().as_str() == myna_core::settings::KEY_INPUT_METHOD_EXTENSION {
+            continue;
+        }
         let plan = widget_plan(setting.metadata());
         let group = match plan.placement {
             Placement::Dictation => &dictation,
@@ -6203,11 +6220,21 @@ fn cancel_source(source: &RefCell<Option<glib::SourceId>>) {
     }
 }
 
-fn persist_request(
+pub(crate) fn persist_request(
     writer: PersistenceWriter,
     controller: Rc<MynaSettingsController>,
     request: PersistenceRequest,
     hold: Option<gio::ApplicationHoldGuard>,
+) {
+    persist_request_then(writer, controller, request, hold, None);
+}
+
+pub(crate) fn persist_request_then(
+    writer: PersistenceWriter,
+    controller: Rc<MynaSettingsController>,
+    request: PersistenceRequest,
+    hold: Option<gio::ApplicationHoldGuard>,
+    on_complete: Option<Box<dyn FnOnce(bool) + 'static>>,
 ) {
     let hold = hold.or_else(|| gio::Application::default().map(|application| application.hold()));
     let job = writer.submit(request.clone());
@@ -6222,7 +6249,11 @@ fn persist_request(
                 }),
             Err(error) => Err(error),
         };
+        let success = matches!(&result, Ok(PersistenceCompletion::Written(_)));
         controller.complete(request, result);
+        if let Some(on_complete) = on_complete {
+            on_complete(success);
+        }
         drop(hold);
     });
 }
