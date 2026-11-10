@@ -8,6 +8,7 @@ use crate::command::CancellationToken;
 pub enum OperationKind {
     BackendApply,
     BackendSwitch,
+    ExtensionToggle,
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]

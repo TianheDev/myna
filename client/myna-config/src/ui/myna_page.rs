@@ -34,6 +34,8 @@ mod imp {
         pub install_button: gtk::TemplateChild<gtk::Button>,
         #[template_child]
         pub install_hint: gtk::TemplateChild<gtk::Label>,
+        #[template_child]
+        pub extension_group: gtk::TemplateChild<adw::PreferencesGroup>,
     }
 
     #[glib::object_subclass]
@@ -86,6 +88,10 @@ impl MynaPage {
 
     pub fn install_hint(&self) -> gtk::Label {
         self.imp().install_hint.get()
+    }
+
+    pub fn extension_group(&self) -> adw::PreferencesGroup {
+        self.imp().extension_group.get()
     }
 
     pub fn shortcut_group(&self) -> adw::PreferencesGroup {

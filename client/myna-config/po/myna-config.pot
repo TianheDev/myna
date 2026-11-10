@@ -147,6 +147,10 @@ msgstr ""
 msgid "Dictation"
 msgstr ""
 
+#: data/myna-page.blp:122 src/diagnostics.rs:817
+msgid "Input method"
+msgstr ""
+
 #: data/onboarding-components.blp:18 src/app.rs:4055 src/onboarding_ui.rs:1427
 msgid "Install components"
 msgstr ""
@@ -1376,10 +1380,6 @@ msgstr ""
 msgid "floor"
 msgstr ""
 
-#: src/diagnostics.rs:817
-msgid "Input method"
-msgstr ""
-
 #: src/diagnostics.rs:818
 msgid "Indicator host"
 msgstr ""
@@ -1450,6 +1450,54 @@ msgstr ""
 
 #: src/diagnostics.rs:862
 msgid "other system copy"
+msgstr ""
+
+#: src/extension_ui.rs:160
+msgid ""
+"The selected input-method extension is no longer installed. Myna will use "
+"IBus."
+msgstr ""
+
+#: src/extension_ui.rs:168
+msgid "The stale input-method extension selection could not be cleared."
+msgstr ""
+
+#: src/extension_ui.rs:216
+msgid "The input-method extension selection could not be saved."
+msgstr ""
+
+#: src/extension_ui.rs:270
+msgid ""
+"Myna could not restart. The input-method selection will apply after Myna "
+"restarts: {detail}"
+msgstr ""
+
+#: src/extension_ui.rs:284
+msgid "Enabled"
+msgstr ""
+
+#: src/extension_ui.rs:285
+msgid "Disabled"
+msgstr ""
+
+#: src/extension_ui.rs:287
+msgid "The provider cannot be reached right now."
+msgstr ""
+
+#: src/extension_ui.rs:290
+msgid "This extension is broken and cannot be enabled."
+msgstr ""
+
+#: src/extension_ui.rs:299
+msgid "This input-method extension cannot be enabled."
+msgstr ""
+
+#: src/extension_ui.rs:303
+msgid "The input-method extension selection could not be saved: {detail}"
+msgstr ""
+
+#: src/extension_ui.rs:310
+msgid "Installed input-method extensions could not be read: {detail}"
 msgstr ""
 
 #: src/myna_settings.rs:77

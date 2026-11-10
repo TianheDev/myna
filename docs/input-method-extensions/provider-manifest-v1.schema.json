@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://canonical.com/myna/input-method-provider-manifest-v1.schema.json",
+  "title": "Myna input-method provider manifest version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "protocols",
+    "socket",
+    "capabilities"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "protocols": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "socket": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+\\.sock$"
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preedit",
+        "surrounding_text",
+        "secure_field_detection"
+      ],
+      "properties": {
+        "preedit": {
+          "type": "boolean"
+        },
+        "surrounding_text": {
+          "type": "boolean"
+        },
+        "secure_field_detection": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

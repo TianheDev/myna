@@ -413,6 +413,7 @@ pub struct BackendUi {
     /// General's settings, told what the active backend does by default so
     /// "When to transcribe" can show it.
     client_settings: Option<Rc<crate::myna_settings::MynaSettingsController>>,
+    extension_ui: RefCell<Option<Rc<crate::extension_ui::ExtensionUi>>>,
     /// The General tab's model rows and the backend each one chooses.
     model_rows: RefCell<Vec<ModelRow>>,
     /// Never shown. GTK draws a check button as a radio only while it is in a
@@ -549,6 +550,7 @@ impl FollowsModel {
 pub struct GeneralSettings {
     pub spoken_language: adw::PreferencesGroup,
     pub controller: Rc<crate::myna_settings::MynaSettingsController>,
+    pub writer: crate::myna_settings::PersistenceWriter,
 }
 
 impl BackendUi {
@@ -597,16 +599,16 @@ impl BackendUi {
         diagnostics_page: adw::NavigationPage,
     ) -> Rc<Self> {
         let controller = BackendController::new(repository);
-        let (follows_model, client_settings) = general_settings
-            .map(|settings| {
-                (
-                    vec![FollowsModel::spoken_language(settings.spoken_language)],
-                    settings.controller,
-                )
-            })
-            .unzip();
-        let follows_model = follows_model.unwrap_or_default();
+        let (follows_model, client_settings, persistence_writer) = match general_settings {
+            Some(settings) => (
+                vec![FollowsModel::spoken_language(settings.spoken_language)],
+                Some(settings.controller),
+                Some(settings.writer),
+            ),
+            None => (Vec::new(), None, None),
+        };
         let myna_selector = myna_page.downcast::<ui::MynaPage>().ok();
+        let extension_configurator = Rc::clone(&configurator);
         let operation_coordinator = OperationCoordinator::new();
         diagnostics_nav.replace(std::slice::from_ref(&diagnostics_page));
         let ui = Rc::new_cyclic(|this| BackendUi {
@@ -624,6 +626,7 @@ impl BackendUi {
             myna_selector,
             follows_model,
             client_settings,
+            extension_ui: RefCell::new(None),
             active_backend: ActiveBackendController::with_coordinator(
                 crate::domain::ConnectionSnapshot::new(
                     Vec::new(),
@@ -651,6 +654,21 @@ impl BackendUi {
             follow_interval: std::cell::Cell::new(FOLLOW_INTERVAL),
             nvidia_gpu: crate::machine::has_nvidia_gpu(),
         });
+        if let (Some(page), Some(controller), Some(writer)) = (
+            ui.myna_selector.as_ref(),
+            ui.client_settings.as_ref(),
+            persistence_writer,
+        ) {
+            *ui.extension_ui.borrow_mut() = Some(crate::extension_ui::ExtensionUi::new(
+                page.extension_group(),
+                overlay.clone(),
+                Rc::new(crate::extensions::SystemExtensionRegistry::system()),
+                Rc::clone(controller),
+                writer,
+                extension_configurator,
+                ui.operation_coordinator.clone(),
+            ));
+        }
 
         ui.connect_view_stack_selection();
         ui.connect_install_button();
@@ -1516,6 +1534,11 @@ impl BackendUi {
     /// refuses while it loads or applies, diagnostics debounce.
     fn refresh_visible_tab(self: &Rc<Self>) {
         match self.view_stack.visible_child_name().as_deref() {
+            Some("general") => {
+                if let Some(extension) = self.extension_ui.borrow().as_ref() {
+                    extension.refresh();
+                }
+            }
             Some("diagnostics") => self.on_diagnostics_requested(),
             Some("model") => {
                 if let Some(page) = self.backend_nav.visible_page() {
@@ -3619,6 +3642,7 @@ mod tests {
             myna_selector,
             follows_model,
             client_settings: None,
+            extension_ui: RefCell::new(None),
             active_backend: ActiveBackendController::with_coordinator(
                 crate::domain::ConnectionSnapshot::new(
                     Vec::new(),

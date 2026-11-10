@@ -20,6 +20,7 @@ src/shortcut_ui.rs
 src/list_editor_ui.rs
 src/sound_preview.rs
 src/diagnostics.rs
+src/extension_ui.rs
 src/myna_settings.rs
 src/model_family.rs
 src/presentation.rs

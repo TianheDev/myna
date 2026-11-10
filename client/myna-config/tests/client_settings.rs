@@ -12,7 +12,6 @@ use myna_config::myna_settings::{
     widget_plan, MynaSettingsController, PersistenceWriter, WidgetKind,
 };
 use myna_config::ports::{ClientSettings, ClientSettingsError};
-use myna_core::settings::KEY_INPUT_METHOD_EXTENSION;
 
 const SCHEMA_ID: &str = "com.canonical.Myna.Dictation";
 static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
@@ -95,16 +94,12 @@ fn open_adapter(files: &TestFiles) -> GioClientSettings {
 fn enumerates_the_real_schema_and_its_metadata() {
     let files = TestFiles::new("metadata");
     let source = real_schema_source(&files);
-    let mut expected = source.lookup(SCHEMA_ID, false).unwrap().list_keys();
-    expected.retain(|key| key != KEY_INPUT_METHOD_EXTENSION);
+    let expected = source.lookup(SCHEMA_ID, false).unwrap().list_keys();
     let adapter =
         GioClientSettings::open_with_source(&source, files.0.join("settings/keyfile")).unwrap();
 
     let settings = adapter.list().unwrap();
     assert_eq!(settings.len(), expected.len());
-    assert!(!settings
-        .iter()
-        .any(|setting| setting.key().as_str() == KEY_INPUT_METHOD_EXTENSION));
     assert!(expected
         .iter()
         .all(|key| settings.iter().any(|setting| setting.key().as_str() == key)));
@@ -474,7 +469,7 @@ fn headless_widget_smoke_covers_every_real_schema_key() {
 
     let plans: Vec<_> = adapter.list().unwrap().iter().map(widget_plan).collect();
 
-    assert_eq!(plans.len(), 7);
+    assert_eq!(plans.len(), 8);
     assert!(plans.iter().any(|plan| plan.kind == WidgetKind::Choice));
     let vocabulary = plans
         .iter()
@@ -492,6 +487,11 @@ fn headless_widget_smoke_covers_every_real_schema_key() {
         sound_set.choices,
         ["tine", "myna", "hum", "marimba", "drop", "radio", "koto"]
     );
+    let extension = plans
+        .iter()
+        .find(|plan| plan.key == myna_core::settings::KEY_INPUT_METHOD_EXTENSION)
+        .expect("the internal extension selection is present for the controller");
+    assert_eq!(extension.kind, WidgetKind::Text);
     let switch = plans
         .iter()
         .find(|plan| plan.kind == WidgetKind::Switch)

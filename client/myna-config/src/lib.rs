@@ -13,6 +13,8 @@ pub mod backend_ui;
 pub mod command;
 pub mod diagnostics;
 pub mod domain;
+pub mod extension_ui;
+pub mod extensions;
 pub mod hud_host;
 pub mod list_editor_ui;
 pub mod machine;
